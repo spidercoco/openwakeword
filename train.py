@@ -137,6 +137,3 @@ for i in tqdm(range(n_epochs), total=n_epochs):
         tp = sum(predictions.flatten()[y.flatten() == 1] >= 0.5)
         fn = sum(predictions.flatten()[y.flatten() == 1] < 0.5)
         history['recall'].append(float(tp/(tp+fn).detach().numpy()))
-
-
-
