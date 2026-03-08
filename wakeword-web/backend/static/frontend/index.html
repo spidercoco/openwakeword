@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakeWord Studio</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
+        .navbar { background: white; padding: 0.5rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
+        .nav-links { display: flex; gap: 2rem; margin-left: 3rem; flex: 1; }
+        .nav-item { cursor: pointer; padding: 1rem 0; border-bottom: 2px solid transparent; color: #64748b; font-weight: 500; }
+        .nav-item.active { border-bottom-color: var(--primary); color: var(--primary); }
+        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 2rem; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: #1e293b; }
+        .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
+        .badge.Completed { background: #dcfce7; color: #166534; }
+        .badge.Running { background: #dbeafe; color: #1e40af; }
+        .badge.Failed { background: #fee2e2; color: #991b1b; }
+        input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; }
+        input[type="range"] { margin-bottom: 2rem; padding: 0; }
+        button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
+        .audio-preview { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; background: #f1f5f9; padding: 1rem; border-radius: 8px; }
+        .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
+        .progress-bar { height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 1rem; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s ease-in-out; }
+        .steps-container { display: flex; justify-content: space-between; margin-top: 1rem; position: relative; padding: 0 5px; }
+        .step-dot { width: 14px; height: 14px; border-radius: 50%; background: #e2e8f0; z-index: 2; border: 2px solid white; transition: all 0.3s; }
+        .step-dot.active { background: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
+        .step-dot.completed { background: var(--success); }
+        .step-dot.failed { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
+        .step-dot.retryable:hover { transform: scale(1.3); cursor: pointer; border-color: var(--primary); }
+        .step-line { position: absolute; top: 8px; left: 10px; right: 10px; height: 2px; background: #e2e8f0; z-index: 1; }
+        .step-names { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.6rem; color: #94a3b8; }
+        .step-name.active { color: var(--primary); font-weight: bold; }
+        .model-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+        .recall-tag { background: #fef3c7; color: #92400e; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; margin-top: 0.5rem; display: inline-block; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .modal-content { background: white; padding: 2rem; border-radius: 12px; width: 450px; position: relative; }
+        .mic-button { width: 80px; height: 80px; border-radius: 50%; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 2rem auto; cursor: pointer; transition: all 0.2s; border: none; }
+        .mic-button.recording { background: #ef4444; color: white; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .test-score { text-align: center; margin-top: 1.5rem; min-height: 80px; }
+        .score-val { font-size: 2.5rem; font-weight: 800; color: var(--primary); transition: all 0.2s; }
+        .detected-alert { background: var(--success); color: white; padding: 1rem; border-radius: 8px; margin-top: 1rem; text-align: center; animation: slideIn 0.3s; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [token, setToken] = useState(localStorage.getItem('token'));
+            const [activeTab, setActiveTab] = useState("train");
+            const [wakeword, setWakeword] = useState("");
+            const [speaker, setSpeaker] = useState("vivian");
+            const [previews, setPreviews] = useState([]);
+            const [tasks, setTasks] = useState([]);
+            const [models, setModels] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [uiStep, setUiStep] = useState(1); 
+            const [selectedPlot, setSelectedPlot] = useState(null);
+            
+            // --- 测试相关状态 ---
+            const [testingModel, setTestingModel] = useState(null);
+            const [isListening, setIsListening] = useState(false);
+            const [currentScore, setCurrentScore] = useState(0);
+            const [isDetected, setIsDetected] = useState(false);
+            const mediaRecorder = useRef(null);
+            const audioBuffer = useRef([]); // 用于累计一小段时间的音频
+            const detectedTimeout = useRef(null);
+
+            const [numSamples, setNumSamples] = useState(100);
+            const [epochs, setEpochs] = useState(50);
+
+            const API = "/api";
+            const ALL_STEPS = ["样本生成", "重采样", "负向特征", "正向特征", "模型训练"];
+
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const t = params.get('token');
+                if (t) {
+                    setToken(t);
+                    localStorage.setItem('token', t);
+                    window.history.replaceState({}, "", window.location.pathname);
+                }
+                fetchUser();
+                fetchTasks();
+                const timer = setInterval(fetchTasks, 3000);
+                return () => clearInterval(timer);
+            }, [token]);
+
+            useEffect(() => { if (activeTab === "models") fetchModels(); }, [activeTab]);
+
+            const fetchUser = () => {
+                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+                fetch(`${API}/me`, { headers }).then(r => r.ok ? r.json() : null).then(u => { if (u) setUser(u); });
+            };
+
+            const fetchTasks = () => {
+                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+                fetch(`${API}/my-tasks`, { headers }).then(r => r.ok ? r.json() : []).then(setTasks);
+            };
+
+            const fetchModels = () => {
+                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+                fetch(`${API}/models`, { headers }).then(r => r.ok ? r.json() : []).then(setModels);
+            };
+
+            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
+
+            const handlePreview = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API}/preview`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ wakeword, speaker })
+                    });
+                    const data = await res.json();
+                    setPreviews(data.urls || []);
+                } catch(e) { alert("Preview failed"); }
+                setLoading(false);
+            };
+
+            const handleTrain = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API}/train`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ wakeword, num_samples: numSamples, epochs: epochs })
+                    });
+                    if (res.ok) { setUiStep(1); setWakeword(""); setPreviews([]); fetchTasks(); }
+                } catch(e) { alert("Failed to start training"); }
+                setLoading(false);
+            };
+
+            const handleRetry = async (taskId, stepNum) => {
+                if (!window.confirm(`确定要从第 ${stepNum} 步开始重试吗？`)) return;
+                const res = await fetch(`${API}/retry/${taskId}?step=${stepNum}`, { method: 'POST' });
+                if (res.ok) { fetchTasks(); }
+            };
+
+            // --- 实时监听逻辑 ---
+            const toggleListening = async () => {
+                if (isListening) {
+                    stopListening();
+                } else {
+                    startListening();
+                }
+            };
+
+            const startListening = async () => {
+                setIsDetected(false);
+                setCurrentScore(0);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    // 使用 MediaRecorder 定时切片
+                    mediaRecorder.current = new MediaRecorder(stream);
+                    mediaRecorder.current.ondataavailable = (e) => {
+                        if (e.data.size > 0) {
+                            sendChunk(e.data);
+                        }
+                    };
+                    // 每 1500ms 发送一段音频进行检测
+                    mediaRecorder.current.start(1500); 
+                    setIsListening(true);
+                } catch (e) {
+                    alert("Could not access microphone.");
+                }
+            };
+
+            const stopListening = () => {
+                if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
+                    mediaRecorder.current.stop();
+                    mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
+                }
+                setIsListening(false);
+                setCurrentScore(0);
+                setIsDetected(false);
+            };
+
+            const sendChunk = async (blob) => {
+                const formData = new FormData();
+                formData.append('file', blob, 'chunk.wav');
+                
+                try {
+                    const res = await fetch(`${API}/test/${testingModel.id}`, {
+                        method: 'POST',
+                        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                        body: formData
+                    });
+                    const result = await res.json();
+                    setCurrentScore(result.score);
+                    
+                    if (result.detected) {
+                        triggerDetected();
+                    }
+                } catch(e) { console.error("Chunk test failed", e); }
+            };
+
+            const triggerDetected = () => {
+                setIsDetected(true);
+                if (detectedTimeout.current) clearTimeout(detectedTimeout.current);
+                detectedTimeout.current = setTimeout(() => setIsDetected(false), 2000);
+                // 可以加个提示音
+                try { new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg").play(); } catch(e){}
+            };
+
+            const getTaskStep = (subStatus) => {
+                if (!subStatus) return 0;
+                const match = subStatus.match(/(\d)\/5/);
+                return match ? parseInt(match[1]) : 0;
+            };
+
+            if (!user) return (
+                <div style={{display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
+                    <h1>🐻 WakeWord Studio</h1>
+                    <p>Train your custom wakeword online.</p>
+                    <button onClick={() => window.location.href='/login/github'} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>Login with GitHub</button>
+                    <button onClick={() => setUser({username: 'Guest'})} style={{marginTop: '1rem', background: 'none', border: 'none', color: 'blue', cursor: 'pointer', textDecoration: 'underline'}}>Local Preview</button>
+                </div>
+            );
+
+            return (
+                <div>
+                    {/* Plot Modal */}
+                    {selectedPlot && (
+                        <div className="modal-overlay" onClick={() => setSelectedPlot(null)}>
+                            <div className="modal-content" style={{width: 'auto'}}>
+                                <img src={selectedPlot} style={{maxWidth: '100%', borderRadius: '8px'}} />
+                                <button onClick={() => setSelectedPlot(null)} className="btn-outline" style={{marginTop: '1rem'}}>Close</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Stream Test Modal */}
+                    {testingModel && (
+                        <div className="modal-overlay">
+                            <div className="modal-content" style={{textAlign: 'center'}}>
+                                <h3>Listening: {testingModel.wakeword}</h3>
+                                <p style={{color: '#64748b'}}>Continuous mode. Say the word anytime.</p>
+                                
+                                <button 
+                                    className={`mic-button ${isListening ? 'recording' : ''}`}
+                                    onClick={toggleListening}
+                                >
+                                    {isListening ? "Stop" : "🎤 Start Listening"}
+                                </button>
+
+                                <div className="test-score">
+                                    <div className="score-val" style={{color: currentScore > 0.5 ? '#10b981' : ''}}>
+                                        {(currentScore * 100).toFixed(1)}%
+                                    </div>
+                                    <p style={{fontSize: '0.8rem', color: '#94a3b8'}}>Current Probability</p>
+                                </div>
+
+                                {isDetected && (
+                                    <div className="detected-alert">
+                                        ✨ DETECTED!
+                                    </div>
+                                )}
+
+                                <button onClick={() => {stopListening(); setTestingModel(null);}} className="btn-outline" style={{marginTop: '2rem'}}>Close</button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="navbar">
+                        <strong style={{fontSize: '1.2rem', color: '#1e293b'}}>WakeWord Studio</strong>
+                        <div className="nav-links">
+                            <div className={`nav-item ${activeTab === 'train' ? 'active' : ''}`} onClick={() => setActiveTab('train')}>Training</div>
+                            <div className={`nav-item ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Model Library</div>
+                        </div>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                            <span style={{fontSize: '0.9rem', color: '#64748b'}}>{user.username}</span>
+                            {user.avatar_url && <img src={user.avatar_url} style={{width: 32, height: 32, borderRadius: '50%'}} />}
+                            <button onClick={logout} className="btn-outline" style={{width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.8rem'}}>Logout</button>
+                        </div>
+                    </div>
+
+                    <div className="layout">
+                        {activeTab === 'train' ? (
+                            <React.Fragment>
+                                <div className="card">
+                                    {uiStep === 1 ? (
+                                        <div>
+                                            <div className="step-header"><h2>Step 1: Preview Samples</h2></div>
+                                            <label>Custom Wakeword</label>
+                                            <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="e.g. 小熊" />
+                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
+                                                {loading ? "Generating..." : "Generate Preview Samples"}
+                                            </button>
+                                            {previews.length > 0 && (
+                                                <div className="audio-preview">
+                                                    {previews.map((url, i) => (
+                                                        <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>
+                                                    ))}
+                                                    <button onClick={() => setUiStep(2)} className="btn-primary" style={{background: '#10b981'}}>Looks Good, Next Step</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <div className="step-header"><h2>Step 2: Training Config</h2></div>
+                                            <p style={{marginBottom: '1.5rem'}}>Selected Word: <strong style={{fontSize: '1.2rem'}}>{wakeword}</strong></p>
+                                            
+                                            <label style={{display: 'flex', justifyContent: 'space-between'}}>
+                                                <span>Dataset Size</span>
+                                                <strong style={{color: 'var(--primary)'}}>{numSamples} samples</strong>
+                                            </label>
+                                            <input type="range" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} min="50" max="5000" step="50" style={{accentColor: 'var(--primary)'}} />
+                                            
+                                            <label style={{display: 'flex', justifyContent: 'space-between'}}>
+                                                <span>Training Intensity</span>
+                                                <strong style={{color: 'var(--primary)'}}>{epochs} epochs</strong>
+                                            </label>
+                                            <input type="range" value={epochs} onChange={e => setEpochs(parseInt(e.target.value))} min="10" max="200" step="5" style={{accentColor: 'var(--primary)'}} />
+                                            
+                                            <button onClick={handleTrain} className="btn-primary" disabled={loading}>
+                                                {loading ? "Submitting..." : "Start Full Pipeline"}
+                                            </button>
+                                            <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '1rem'}}>Back</button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="card" style={{padding: '1.5rem'}}>
+                                    <h3 style={{marginTop: 0}}>Running Tasks</h3>
+                                    {tasks.length === 0 && <p style={{color: '#94a3b8'}}>No active tasks.</p>}
+                                    {tasks.map(t => {
+                                        const currentStep = getTaskStep(t.sub_status);
+                                        return (
+                                            <div key={t.id} className="task-item">
+                                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                                                    <div>
+                                                        <strong style={{fontSize: '1.1rem'}}>{t.wakeword}</strong>
+                                                        <div style={{fontSize: '0.75rem', color: t.status === 'Failed' ? '#ef4444' : '#64748b', marginTop: '2px'}}>
+                                                            {t.sub_status}
+                                                        </div>
+                                                    </div>
+                                                    <span className={`badge ${t.status}`}>{t.status}</span>
+                                                </div>
+                                                <div className="progress-bar">
+                                                    <div className="progress-fill" style={{width: `${t.progress}%`, background: t.status === 'Failed' ? '#ef4444' : ''}}></div>
+                                                </div>
+                                                <div className="steps-container">
+                                                    <div className="step-line"></div>
+                                                    {[1, 2, 3, 4, 5].map(s => {
+                                                        let statusClass = "retryable ";
+                                                        if (s < currentStep) statusClass += "completed";
+                                                        else if (s === currentStep) statusClass += t.status === 'Failed' ? 'failed' : 'active';
+                                                        return <div key={s} title={`Click to retry from step ${s}`} className={`step-dot ${statusClass}`} onClick={() => handleRetry(t.id, s)}></div>;
+                                                    })}
+                                                </div>
+                                                <div className="step-names">
+                                                    {ALL_STEPS.map((name, idx) => (<div key={idx} className={`step-name ${idx+1===currentStep ? 'active' : ''}`}>{name}</div>))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </React.Fragment>
+                        ) : (
+                            <div className="card" style={{gridColumn: '1 / span 2'}}>
+                                <h2>Model Library</h2>
+                                <p style={{color: '#64748b', marginBottom: '2rem'}}>Manage and download your trained ONNX models.</p>
+                                {models.length === 0 && <div style={{textAlign: 'center', padding: '4rem', color: '#94a3b8', border: '2px dashed #e2e8f0', borderRadius: '12px'}}>No models trained yet. Go back to Training tab to start.</div>}
+                                {models.map(m => (
+                                    <div key={m.id} className="model-card">
+                                        <div>
+                                            <strong style={{fontSize: '1.2rem', color: '#1e293b'}}>{m.wakeword}</strong>
+                                            <div style={{fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px'}}>
+                                                ID: {m.id} • {new Date(m.created_at).toLocaleDateString()}
+                                            </div>
+                                            <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
+                                                {m.params && (
+                                                    <React.Fragment>
+                                                        <span className="recall-tag" style={{background: '#e0f2fe', color: '#075985'}}>Samples: {m.params.num_samples}</span>
+                                                        <span className="recall-tag" style={{background: '#f3e8ff', color: '#6b21a8'}}>Epochs: {m.params.epochs}</span>
+                                                    </React.Fragment>
+                                                )}
+                                                {m.recall !== undefined && <span className="recall-tag">Recall: {(m.recall * 100).toFixed(1)}%</span>}
+                                            </div>
+                                        </div>
+                                        <div style={{display: 'flex', gap: '1rem', alignItems: 'center'}}>
+                                            {m.plot_url && <button onClick={() => setSelectedPlot(m.plot_url)} className="btn-outline" style={{width: 'auto', padding: '0.6rem 1rem'}}>View Plot</button>}
+                                            <button onClick={() => setTestingModel(m)} className="btn-outline" style={{width: 'auto', padding: '0.6rem 1rem', borderColor: '#10b981', color: '#10b981'}}>Test Online</button>
+                                            <button onClick={() => window.open(m.download_url)} className="btn-primary" style={{width: 'auto', padding: '0.6rem 1.5rem'}}>Download ONNX</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
