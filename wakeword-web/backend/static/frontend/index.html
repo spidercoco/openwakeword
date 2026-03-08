@@ -72,19 +72,19 @@
             const [uiStep, setUiStep] = useState(1); 
             const [selectedPlot, setSelectedPlot] = useState(null);
             
-            // --- 测试相关状态 ---
             const [testingModel, setTestingModel] = useState(null);
             const [isListening, setIsListening] = useState(false);
             const [currentScore, setCurrentScore] = useState(0);
             const [isDetected, setIsDetected] = useState(false);
             const mediaRecorder = useRef(null);
-            const audioBuffer = useRef([]); // 用于累计一小段时间的音频
             const detectedTimeout = useRef(null);
 
             const [numSamples, setNumSamples] = useState(100);
             const [epochs, setEpochs] = useState(50);
 
-            const API = "/api";
+            // 设置统一前缀
+            const BASE = "/oww";
+            const API = `${BASE}/api`;
             const ALL_STEPS = ["样本生成", "重采样", "负向特征", "正向特征", "模型训练"];
 
             useEffect(() => {
@@ -115,7 +115,7 @@
 
             const fetchModels = () => {
                 const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                fetch(`${API}/models`, { headers }).then(r => r.ok ? r.json() : []).then(setModels);
+                fetch(`${API}/models`, { headers }).then(r => r.json()).then(setModels);
             };
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
@@ -153,33 +153,18 @@
                 if (res.ok) { fetchTasks(); }
             };
 
-            // --- 实时监听逻辑 ---
-            const toggleListening = async () => {
-                if (isListening) {
-                    stopListening();
-                } else {
-                    startListening();
-                }
-            };
+            const toggleListening = async () => { if (isListening) { stopListening(); } else { startListening(); } };
 
             const startListening = async () => {
                 setIsDetected(false);
                 setCurrentScore(0);
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    // 使用 MediaRecorder 定时切片
                     mediaRecorder.current = new MediaRecorder(stream);
-                    mediaRecorder.current.ondataavailable = (e) => {
-                        if (e.data.size > 0) {
-                            sendChunk(e.data);
-                        }
-                    };
-                    // 每 1500ms 发送一段音频进行检测
+                    mediaRecorder.current.ondataavailable = (e) => { if (e.data.size > 0) sendChunk(e.data); };
                     mediaRecorder.current.start(1500); 
                     setIsListening(true);
-                } catch (e) {
-                    alert("Could not access microphone.");
-                }
+                } catch (e) { alert("Microphone access denied."); }
             };
 
             const stopListening = () => {
@@ -195,7 +180,6 @@
             const sendChunk = async (blob) => {
                 const formData = new FormData();
                 formData.append('file', blob, 'chunk.wav');
-                
                 try {
                     const res = await fetch(`${API}/test/${testingModel.id}`, {
                         method: 'POST',
@@ -204,10 +188,7 @@
                     });
                     const result = await res.json();
                     setCurrentScore(result.score);
-                    
-                    if (result.detected) {
-                        triggerDetected();
-                    }
+                    if (result.detected) { triggerDetected(); }
                 } catch(e) { console.error("Chunk test failed", e); }
             };
 
@@ -215,7 +196,6 @@
                 setIsDetected(true);
                 if (detectedTimeout.current) clearTimeout(detectedTimeout.current);
                 detectedTimeout.current = setTimeout(() => setIsDetected(false), 2000);
-                // 可以加个提示音
                 try { new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg").play(); } catch(e){}
             };
 
@@ -229,14 +209,13 @@
                 <div style={{display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
                     <h1>🐻 WakeWord Studio</h1>
                     <p>Train your custom wakeword online.</p>
-                    <button onClick={() => window.location.href='/login/github'} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>Login with GitHub</button>
+                    <button onClick={() => window.location.href=`${BASE}/login/github`} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>Login with GitHub</button>
                     <button onClick={() => setUser({username: 'Guest'})} style={{marginTop: '1rem', background: 'none', border: 'none', color: 'blue', cursor: 'pointer', textDecoration: 'underline'}}>Local Preview</button>
                 </div>
             );
 
             return (
                 <div>
-                    {/* Plot Modal */}
                     {selectedPlot && (
                         <div className="modal-overlay" onClick={() => setSelectedPlot(null)}>
                             <div className="modal-content" style={{width: 'auto'}}>
@@ -246,33 +225,21 @@
                         </div>
                     )}
 
-                    {/* Stream Test Modal */}
                     {testingModel && (
                         <div className="modal-overlay">
                             <div className="modal-content" style={{textAlign: 'center'}}>
                                 <h3>Listening: {testingModel.wakeword}</h3>
                                 <p style={{color: '#64748b'}}>Continuous mode. Say the word anytime.</p>
-                                
-                                <button 
-                                    className={`mic-button ${isListening ? 'recording' : ''}`}
-                                    onClick={toggleListening}
-                                >
+                                <button className={`mic-button ${isListening ? 'recording' : ''}`} onClick={toggleListening}>
                                     {isListening ? "Stop" : "🎤 Start Listening"}
                                 </button>
-
                                 <div className="test-score">
                                     <div className="score-val" style={{color: currentScore > 0.5 ? '#10b981' : ''}}>
                                         {(currentScore * 100).toFixed(1)}%
                                     </div>
                                     <p style={{fontSize: '0.8rem', color: '#94a3b8'}}>Current Probability</p>
                                 </div>
-
-                                {isDetected && (
-                                    <div className="detected-alert">
-                                        ✨ DETECTED!
-                                    </div>
-                                )}
-
+                                {isDetected && <div className="detected-alert">✨ DETECTED!</div>}
                                 <button onClick={() => {stopListening(); setTestingModel(null);}} className="btn-outline" style={{marginTop: '2rem'}}>Close</button>
                             </div>
                         </div>
@@ -316,19 +283,16 @@
                                         <div>
                                             <div className="step-header"><h2>Step 2: Training Config</h2></div>
                                             <p style={{marginBottom: '1.5rem'}}>Selected Word: <strong style={{fontSize: '1.2rem'}}>{wakeword}</strong></p>
-                                            
                                             <label style={{display: 'flex', justifyContent: 'space-between'}}>
                                                 <span>Dataset Size</span>
                                                 <strong style={{color: 'var(--primary)'}}>{numSamples} samples</strong>
                                             </label>
                                             <input type="range" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} min="50" max="5000" step="50" style={{accentColor: 'var(--primary)'}} />
-                                            
                                             <label style={{display: 'flex', justifyContent: 'space-between'}}>
                                                 <span>Training Intensity</span>
                                                 <strong style={{color: 'var(--primary)'}}>{epochs} epochs</strong>
                                             </label>
                                             <input type="range" value={epochs} onChange={e => setEpochs(parseInt(e.target.value))} min="10" max="200" step="5" style={{accentColor: 'var(--primary)'}} />
-                                            
                                             <button onClick={handleTrain} className="btn-primary" disabled={loading}>
                                                 {loading ? "Submitting..." : "Start Full Pipeline"}
                                             </button>

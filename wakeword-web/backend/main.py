@@ -63,12 +63,15 @@ class TrainRequest(BaseModel):
     num_samples: int
     epochs: int
 
-app = FastAPI()
+# 设置 root_path 为 /oww
+app = FastAPI(root_path="/oww")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 os.makedirs("static/previews", exist_ok=True)
 os.makedirs("static/datasets", exist_ok=True)
+
+# 挂载静态文件到 /static (在 root_path 下实际上是 /oww/static)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- 依赖与鉴权 ---
@@ -216,8 +219,8 @@ def training_pipeline(task_id: str, resume_from_step: int = 1):
 # --- 路由 ---
 @app.get("/")
 async def read_root():
-    # 改为相对路径
-    return RedirectResponse(url="static/frontend/index.html")
+    # 绝对路径带上 /oww/
+    return RedirectResponse(url="/oww/static/frontend/index.html")
 
 @app.get("/api/me")
 async def get_me(user: User = Depends(get_current_user)):
@@ -238,13 +241,13 @@ async def list_models(user: User = Depends(get_current_user), db: Session = Depe
         model_path = os.path.join(task_dir, "beary_custom.onnx")
         metrics_path = os.path.join(task_dir, "metrics.json")
         if os.path.exists(model_path):
-            # 移除开头的 / 改为相对路径
             m_data = {
                 "id": t.id, 
                 "wakeword": t.wakeword, 
                 "created_at": t.created_at, 
                 "params": t.params,
-                "download_url": f"static/datasets/{t.id}/beary_custom.onnx"
+                # 返回带 /oww/ 的绝对路径供前端使用
+                "download_url": f"/oww/static/datasets/{t.id}/beary_custom.onnx"
             }
             if os.path.exists(metrics_path):
                 try:
@@ -254,7 +257,7 @@ async def list_models(user: User = Depends(get_current_user), db: Session = Depe
                 except: pass
             plot_path = os.path.join(task_dir, "training_plot.png")
             if os.path.exists(plot_path):
-                m_data["plot_url"] = f"static/datasets/{t.id}/training_plot.png"
+                m_data["plot_url"] = f"/oww/static/datasets/{t.id}/training_plot.png"
             models.append(m_data)
     return models
 
@@ -272,8 +275,7 @@ async def generate_preview(req: PreviewRequest, user: User = Depends(get_current
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
-    # 移除开头的 / 改为相对路径
-    urls = [f"static/previews/{preview_id}/{f}" for f in files]
+    urls = [f"/oww/static/previews/{preview_id}/{f}" for f in files]
     return {"urls": urls}
 
 @app.post("/api/train")
