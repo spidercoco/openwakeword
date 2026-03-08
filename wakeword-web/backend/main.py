@@ -22,8 +22,6 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
 ALGORITHM = "HS256"
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "mock-id")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "mock-secret")
-CONDA_ENV_TTS = os.getenv("CONDA_ENV_NAME", "qwen3-tts")
-CONDA_ENV_TRAIN = "python310"
 
 DATABASE_URL = "sqlite:///./wakeword.db"
 
@@ -63,15 +61,15 @@ class TrainRequest(BaseModel):
     num_samples: int
     epochs: int
 
-# 设置 root_path 为 /oww
-app = FastAPI(root_path="/oww")
+# 设置 root_path 为 /site
+app = FastAPI(root_path="/site")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 os.makedirs("static/previews", exist_ok=True)
 os.makedirs("static/datasets", exist_ok=True)
 
-# 挂载静态文件到 /static (在 root_path 下实际上是 /oww/static)
+# 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- 依赖与鉴权 ---
@@ -113,7 +111,7 @@ def run_command_with_progress(cmd: List[str], task_id: str, step_num: int, start
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
 
-    print(f"Executing Step {step_num}: {' '.join(cmd)}")
+    print(f"Executing: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
     
     progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
@@ -164,39 +162,15 @@ def training_pipeline(task_id: str, resume_from_step: int = 1):
         model_out = os.path.join(dataset_dir, "beary_custom.onnx")
 
         if resume_from_step <= 1:
-            run_command_with_progress(
-                ["conda", "run", "-n", CONDA_ENV_TTS, "--no-capture-output", "python", "generate_samples.py", 
-                 "--wakeword", wakeword, "--output_dir", wavs_raw_dir, "--num_samples", str(num_samples)],
-                task_id, 1, 0, 40, "生成声音样本", cwd=scripts_dir
-            )
-
+            run_command_with_progress(["python", "generate_samples.py", "--wakeword", wakeword, "--output_dir", wavs_raw_dir, "--num_samples", str(num_samples)], task_id, 1, 0, 40, "生成声音样本", cwd=scripts_dir)
         if resume_from_step <= 2:
-            run_command_with_progress(
-                ["conda", "run", "-n", CONDA_ENV_TRAIN, "--no-capture-output", "python", "resample_web.py",
-                 "--input_dir", wavs_raw_dir, "--output_dir", wavs_resampled_dir],
-                task_id, 2, 40, 50, "重采样正样本", cwd=scripts_dir
-            )
-
+            run_command_with_progress(["python", "resample_web.py", "--input_dir", wavs_raw_dir, "--output_dir", wavs_resampled_dir], task_id, 2, 40, 50, "重采样正样本", cwd=scripts_dir)
         if resume_from_step <= 3:
-            run_command_with_progress(
-                ["conda", "run", "-n", CONDA_ENV_TRAIN, "--no-capture-output", "python", "negative_web.py",
-                 "--output_file", neg_feat],
-                task_id, 3, 50, 70, "提取负样本特征", cwd=scripts_dir
-            )
-
+            run_command_with_progress(["python", "negative_web.py", "--output_file", neg_feat], task_id, 3, 50, 70, "提取负样本特征", cwd=scripts_dir)
         if resume_from_step <= 4:
-            run_command_with_progress(
-                ["conda", "run", "-n", CONDA_ENV_TRAIN, "--no-capture-output", "python", "positive_web.py",
-                 "--positive_input_dir", wavs_resampled_dir, "--output_file", pos_feat],
-                task_id, 4, 70, 85, "提取正样本特征", cwd=scripts_dir
-            )
-
+            run_command_with_progress(["python", "positive_web.py", "--positive_input_dir", wavs_resampled_dir, "--output_file", pos_feat], task_id, 4, 70, 85, "提取正样本特征", cwd=scripts_dir)
         if resume_from_step <= 5:
-            run_command_with_progress(
-                ["conda", "run", "-n", CONDA_ENV_TRAIN, "--no-capture-output", "python", "train_web.py",
-                 "--positive_features", pos_feat, "--negative_features", neg_feat, "--output_model", model_out, "--epochs", str(epochs)],
-                task_id, 5, 85, 100, "模型训练中", cwd=scripts_dir
-            )
+            run_command_with_progress(["python", "train_web.py", "--positive_features", pos_feat, "--negative_features", neg_feat, "--output_model", model_out, "--epochs", str(epochs)], task_id, 5, 85, 100, "模型训练中", cwd=scripts_dir)
 
         db_f = SessionLocal()
         t_f = db_f.query(Task).filter(Task.id == task_id).first()
@@ -219,8 +193,7 @@ def training_pipeline(task_id: str, resume_from_step: int = 1):
 # --- 路由 ---
 @app.get("/")
 async def read_root():
-    # 绝对路径带上 /oww/
-    return RedirectResponse(url="/oww/static/frontend/index.html")
+    return RedirectResponse(url="/site/static/frontend/index.html")
 
 @app.get("/api/me")
 async def get_me(user: User = Depends(get_current_user)):
@@ -246,8 +219,7 @@ async def list_models(user: User = Depends(get_current_user), db: Session = Depe
                 "wakeword": t.wakeword, 
                 "created_at": t.created_at, 
                 "params": t.params,
-                # 返回带 /oww/ 的绝对路径供前端使用
-                "download_url": f"/oww/static/datasets/{t.id}/beary_custom.onnx"
+                "download_url": f"/site/static/datasets/{t.id}/beary_custom.onnx"
             }
             if os.path.exists(metrics_path):
                 try:
@@ -257,7 +229,7 @@ async def list_models(user: User = Depends(get_current_user), db: Session = Depe
                 except: pass
             plot_path = os.path.join(task_dir, "training_plot.png")
             if os.path.exists(plot_path):
-                m_data["plot_url"] = f"/oww/static/datasets/{t.id}/training_plot.png"
+                m_data["plot_url"] = f"/site/static/datasets/{t.id}/training_plot.png"
             models.append(m_data)
     return models
 
@@ -268,14 +240,13 @@ async def generate_preview(req: PreviewRequest, user: User = Depends(get_current
     output_dir = os.path.join(backend_dir, "static/previews", preview_id)
     os.makedirs(output_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
-    cmd = ["conda", "run", "-n", CONDA_ENV_TTS, "--no-capture-output", "python", "generate_samples.py", 
-           "--wakeword", req.wakeword, "--output_dir", output_dir, "--num_samples", "3"]
+    cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", output_dir, "--num_samples", "3"]
     env = os.environ.copy()
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
-    urls = [f"/oww/static/previews/{preview_id}/{f}" for f in files]
+    urls = [f"/site/static/previews/{preview_id}/{f}" for f in files]
     return {"urls": urls}
 
 @app.post("/api/train")
@@ -306,10 +277,7 @@ async def get_status(task_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/test/{task_id}")
 async def test_model(task_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    import librosa
-    import onnxruntime as ort
-    import openwakeword.utils
-    import numpy as np
+    import librosa, onnxruntime as ort, openwakeword.utils, numpy as np
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(backend_dir, "static/datasets", task_id, "beary_custom.onnx")
     if not os.path.exists(model_path):

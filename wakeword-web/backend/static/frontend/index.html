@@ -82,8 +82,8 @@
             const [numSamples, setNumSamples] = useState(100);
             const [epochs, setEpochs] = useState(50);
 
-            // 设置统一前缀
-            const BASE = "/oww";
+            // 统一改为 /site
+            const BASE = "/site";
             const API = `${BASE}/api`;
             const ALL_STEPS = ["样本生成", "重采样", "负向特征", "正向特征", "模型训练"];
 
@@ -115,7 +115,7 @@
 
             const fetchModels = () => {
                 const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                fetch(`${API}/models`, { headers }).then(r => r.json()).then(setModels);
+                fetch(`${API}/models`, { headers }).then(r => r.ok ? r.json() : []).then(setModels);
             };
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
@@ -216,6 +216,7 @@
 
             return (
                 <div>
+                    {/* Plot Modal */}
                     {selectedPlot && (
                         <div className="modal-overlay" onClick={() => setSelectedPlot(null)}>
                             <div className="modal-content" style={{width: 'auto'}}>
@@ -225,6 +226,7 @@
                         </div>
                     )}
 
+                    {/* Stream Test Modal */}
                     {testingModel && (
                         <div className="modal-overlay">
                             <div className="modal-content" style={{textAlign: 'center'}}>
