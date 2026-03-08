@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -63,7 +63,7 @@ class TrainRequest(BaseModel):
     num_samples: int
     epochs: int
 
-app = FastAPI(root_path="/site")
+app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
@@ -120,7 +120,6 @@ def run_command_with_progress(cmd: List[str], task_id: str, step_num: int, start
             current = int(match.group(1))
             total = int(match.group(2))
             percent = int(start_progress + (end_progress - start_progress) * (current / total))
-            
             db_u = SessionLocal()
             t_u = db_u.query(Task).filter(Task.id == task_id).first()
             if t_u:
@@ -217,7 +216,8 @@ def training_pipeline(task_id: str, resume_from_step: int = 1):
 # --- 路由 ---
 @app.get("/")
 async def read_root():
-    return RedirectResponse(url="/static/frontend/index.html")
+    # 改为相对路径
+    return RedirectResponse(url="static/frontend/index.html")
 
 @app.get("/api/me")
 async def get_me(user: User = Depends(get_current_user)):
@@ -233,34 +233,28 @@ async def list_models(user: User = Depends(get_current_user), db: Session = Depe
     models = []
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     import json
-    
     for t in completed_tasks:
         task_dir = os.path.join(backend_dir, "static/datasets", t.id)
         model_path = os.path.join(task_dir, "beary_custom.onnx")
         metrics_path = os.path.join(task_dir, "metrics.json")
-        
         if os.path.exists(model_path):
+            # 移除开头的 / 改为相对路径
             m_data = {
                 "id": t.id, 
                 "wakeword": t.wakeword, 
                 "created_at": t.created_at, 
-                "params": t.params, # 包含 num_samples, epochs
-                "download_url": f"/static/datasets/{t.id}/beary_custom.onnx"
+                "params": t.params,
+                "download_url": f"static/datasets/{t.id}/beary_custom.onnx"
             }
-            
-            # 读取指标
             if os.path.exists(metrics_path):
                 try:
                     with open(metrics_path, "r") as f:
                         metrics = json.load(f)
                         m_data["recall"] = metrics.get("final_recall", 0)
                 except: pass
-            
-            # 检查是否有图表
             plot_path = os.path.join(task_dir, "training_plot.png")
             if os.path.exists(plot_path):
-                m_data["plot_url"] = f"/static/datasets/{t.id}/training_plot.png"
-                
+                m_data["plot_url"] = f"static/datasets/{t.id}/training_plot.png"
             models.append(m_data)
     return models
 
@@ -278,7 +272,8 @@ async def generate_preview(req: PreviewRequest, user: User = Depends(get_current
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
-    urls = [f"/static/previews/{preview_id}/{f}" for f in files]
+    # 移除开头的 / 改为相对路径
+    urls = [f"static/previews/{preview_id}/{f}" for f in files]
     return {"urls": urls}
 
 @app.post("/api/train")
@@ -303,8 +298,6 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks, step: int 
     background_tasks.add_task(training_pipeline, task_id, start_from)
     return {"message": f"Retry started from step {start_from}"}
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request, UploadFile, File
-...
 @app.get("/api/status/{task_id}")
 async def get_status(task_id: str, db: Session = Depends(get_db)):
     return db.query(Task).filter(Task.id == task_id).first()
@@ -315,44 +308,28 @@ async def test_model(task_id: str, file: UploadFile = File(...), db: Session = D
     import onnxruntime as ort
     import openwakeword.utils
     import numpy as np
-    
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(backend_dir, "static/datasets", task_id, "beary_custom.onnx")
-    
     if not os.path.exists(model_path):
         raise HTTPException(status_code=404, detail="Model file not found")
-
-    # 1. 加载并预处理音频 (重采样到 16kHz)
     audio, _ = librosa.load(file.file, sr=16000)
-    
-    # 填充到至少 3 秒，并前补静音（符合我们之前的 check_wakeword 逻辑）
     min_length = 3 * 16000
     if len(audio) < min_length:
         audio = np.pad(audio, (min_length - len(audio), 0))
     else:
         audio = np.pad(audio, (min_length, 0))
-
-    # 转换格式为 openwakeword 要求的 int16
     audio_int16 = (audio * 32767).astype(np.int16).reshape(1, -1)
-
-    # 2. 提取特征 (使用 openwakeword 官方工具)
     F = openwakeword.utils.AudioFeatures()
-    features = F.embed_clips(audio_int16) # (1, N, 96)
-
-    # 3. 运行自定义模型推理
+    features = F.embed_clips(audio_int16)
     session = ort.InferenceSession(model_path)
     input_name = session.get_inputs()[0].name
-    model_window_size = session.get_inputs()[0].shape[1] # 应该是 28
-    
+    model_window_size = session.get_inputs()[0].shape[1]
     n_embeddings = features.shape[1]
     scores = []
-    
-    # 滑动窗口推理
     for i in range(0, n_embeddings - model_window_size + 1):
         window = features[:, i : i + model_window_size, :]
         outputs = session.run(None, {input_name: window})
         scores.append(float(outputs[0][0][0]))
-    
     max_score = max(scores) if scores else 0
     return {"score": max_score, "detected": max_score > 0.5}
 
