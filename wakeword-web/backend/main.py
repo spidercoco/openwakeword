@@ -50,6 +50,30 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
+# --- 依赖与鉴权 (必须放在路由定义之前) ---
+def get_db():
+    db = SessionLocal()
+    try: yield db
+    finally: db.close()
+
+async def get_current_user(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization")
+    user = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user = db.query(User).filter(User.id == payload.get("user_id")).first()
+        except: pass
+    if not user:
+        user = db.query(User).filter(User.username == "LocalDev").first()
+        if not user:
+            user = User(github_id="local", username="LocalDev", avatar_url="https://github.com/identicons/local.png")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+    return user
+
 class TrainRequest(BaseModel):
     wakeword: str
     similar_words: List[str]
@@ -71,10 +95,10 @@ def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], n
         "similar_phrases": similar_words,
         "n_samples": num_samples,
         "n_samples_val": int(num_samples * 0.2),
-        "steps": epochs * 20, # 模拟 training steps
+        "steps": epochs * 20, 
         "epochs": epochs,
         "model_name": "custom_model",
-        "output_dir": "./" # 脚本相对于 task_dir 运行
+        "output_dir": "./" 
     }
     with open(os.path.join(task_dir, "config.yaml"), "w") as f:
         yaml.dump(config, f)
@@ -90,7 +114,6 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     task_dir = os.path.join(backend_dir, "static/datasets", task_id)
     config_path = os.path.join(task_dir, "config.yaml")
     
-    # 预准备环境参数
     env = os.environ.copy()
     root_dir = os.path.dirname(os.path.dirname(backend_dir))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
@@ -101,23 +124,14 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     db.close()
 
     try:
-        # Step 1: 正式正样本生成
         if resume_from_step <= 1:
             run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
-        
-        # Step 2: 近似词样本生成
         if resume_from_step <= 2:
             run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
-        
-        # Step 3: 统一重采样
         if resume_from_step <= 3:
             run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
-        
-        # Step 4: 样本增强/特征提取
         if resume_from_step <= 4:
             run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
-        
-        # Step 5: 模型训练
         if resume_from_step <= 5:
             run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
@@ -175,7 +189,6 @@ async def generate_preview(req: TrainRequest, u=Depends(get_current_user)):
     out_dir = os.path.join(backend_dir, "static/previews", p_id)
     os.makedirs(out_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
-    # 注意：这里继续用旧脚本做快速预览
     cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
     subprocess.run(cmd, check=True, cwd=scripts_dir)
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
@@ -183,12 +196,14 @@ async def generate_preview(req: TrainRequest, u=Depends(get_current_user)):
 @app.post("/api/generate-similar-words")
 async def generate_similar_words(req: TrainRequest):
     scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
-    # 预留空脚本，您可以之后填充
     cmd = ["python", "v2_gen_word_list.py", "--wakeword", req.wakeword]
     try:
         res = subprocess.check_output(cmd, cwd=scripts_dir, text=True)
         match = re.search(r"WORDS:(.*)", res)
-        return {"similar_words": match.group(1).split(",") if match else []}
+        if match:
+            words = [w.strip() for w in match.group(1).split(",") if w.strip()]
+            return {"similar_words": words}
+        return {"similar_words": []}
     except: return {"similar_words": [req.wakeword + "测试", "近似音1", "近似音2"]}
 
 @app.post("/api/train")
@@ -197,10 +212,7 @@ async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_c
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     task_dir = os.path.join(backend_dir, "static/datasets", task_id)
     os.makedirs(task_dir, exist_ok=True)
-    
-    # 关键：生成本任务专属 YAML
     generate_task_yaml(task_dir, req.wakeword, req.similar_words, req.num_samples, req.epochs)
-    
     new_task = Task(id=task_id, user_id=u.id, wakeword=req.wakeword, similar_words=req.similar_words,
                     status="Pending", sub_status="等待中", params=req.dict(), current_step=1)
     db.add(new_task)
@@ -220,7 +232,6 @@ async def retry_task(task_id: str, bt: BackgroundTasks, step: int = None, db: Se
 @app.get("/api/models")
 async def list_models(user=Depends(get_current_user), db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").all()
-    # 保持原有返回逻辑...
     return [{"id":t.id, "wakeword":t.wakeword, "params":t.params, "download_url":f"/site/static/datasets/{t.id}/beary_custom.onnx"} for t in tasks]
 
 @app.get("/api/status/{task_id}")
