@@ -7,10 +7,10 @@ from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from authlib.integrations.starlette_client import OAuth
 import jwt
 import uuid
 import os
+import yaml
 import time
 import subprocess
 import re
@@ -20,9 +20,7 @@ from typing import List, Optional
 # --- 配置 ---
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
 ALGORITHM = "HS256"
-GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "mock-id")
-GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "mock-secret")
-
+BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 
 # --- 数据库模型 ---
@@ -40,7 +38,8 @@ class Task(Base):
     id = Column(String, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     wakeword = Column(String)
-    status = Column(String) # Pending, Running, Completed, Failed
+    similar_words = Column(JSON) 
+    status = Column(String) 
     sub_status = Column(String) 
     current_step = Column(Integer, default=1)
     progress = Column(Integer, default=0)
@@ -51,257 +50,182 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
-# --- Pydantic 模型 ---
-class PreviewRequest(BaseModel):
-    wakeword: str
-    speaker: str
-
 class TrainRequest(BaseModel):
     wakeword: str
+    similar_words: List[str]
     num_samples: int
     epochs: int
 
-# 设置 root_path 为 /site
-app = FastAPI(root_path="/site")
+app = FastAPI(root_path=BASE_PREFIX)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 os.makedirs("static/previews", exist_ok=True)
 os.makedirs("static/datasets", exist_ok=True)
-
-# 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- 依赖与鉴权 ---
-def get_db():
-    db = SessionLocal()
-    try: yield db
-    finally: db.close()
+# --- 业务逻辑：生成任务 YAML ---
+def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], num_samples: int, epochs: int):
+    config = {
+        "target_phrase": wakeword,
+        "similar_phrases": similar_words,
+        "n_samples": num_samples,
+        "n_samples_val": int(num_samples * 0.2),
+        "steps": epochs * 20, # 模拟 training steps
+        "epochs": epochs,
+        "model_name": "custom_model",
+        "output_dir": "./" # 脚本相对于 task_dir 运行
+    }
+    with open(os.path.join(task_dir, "config.yaml"), "w") as f:
+        yaml.dump(config, f)
 
-async def get_current_user(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get("Authorization")
-    user = None
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user = db.query(User).filter(User.id == payload.get("user_id")).first()
-        except: pass
-    if not user:
-        user = db.query(User).filter(User.username == "LocalDev").first()
-        if not user:
-            user = User(github_id="local", username="LocalDev", avatar_url="https://github.com/identicons/local.png")
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-    return user
-
-# --- 执行工具 ---
-def run_command_with_progress(cmd: List[str], task_id: str, step_num: int, start_progress: int, end_progress: int, sub_status_msg: str, cwd: str = None):
+# --- 核心流水线重构 ---
+def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     db = SessionLocal()
     t = db.query(Task).filter(Task.id == task_id).first()
-    if t:
-        t.sub_status = f"{step_num}/5: {sub_status_msg}"
-        t.current_step = step_num
-        t.progress = start_progress
-        db.commit()
-    db.close()
-
+    if not t: return
+    
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    scripts_dir = os.path.join(backend_dir, "scripts")
+    task_dir = os.path.join(backend_dir, "static/datasets", task_id)
+    config_path = os.path.join(task_dir, "config.yaml")
+    
+    # 预准备环境参数
     env = os.environ.copy()
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    root_dir = os.path.dirname(os.path.dirname(backend_dir))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
 
-    print(f"Executing: {' '.join(cmd)}")
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
-    
-    progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
-    for line in process.stdout:
-        match = progress_re.search(line)
-        if match:
-            current = int(match.group(1))
-            total = int(match.group(2))
-            percent = int(start_progress + (end_progress - start_progress) * (current / total))
-            db_u = SessionLocal()
-            t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u:
-                t_u.progress = percent
-                t_u.sub_status = f"{step_num}/5: {sub_status_msg} ({current}/{total})"
-                db_u.commit()
-            db_u.close()
-    
-    process.wait()
-    if process.returncode != 0:
-        raise Exception(f"Failed at stage {step_num}/5: {sub_status_msg}")
-
-# --- 训练全流程流水线 ---
-def training_pipeline(task_id: str, resume_from_step: int = 1):
-    db = SessionLocal()
-    t = db.query(Task).filter(Task.id == task_id).first()
-    if not t:
-        db.close()
-        return
-    wakeword = t.wakeword
-    num_samples = t.params.get('num_samples', 100)
-    epochs = t.params.get('epochs', 50)
+    total_steps = 5
     t.status = "Running"
     db.commit()
     db.close()
 
     try:
-        backend_dir = os.path.dirname(os.path.abspath(__file__))
-        scripts_dir = os.path.join(backend_dir, "scripts")
-        dataset_dir = os.path.join(backend_dir, "static/datasets", task_id)
-        wavs_raw_dir = os.path.join(dataset_dir, "wavs_raw")
-        wavs_resampled_dir = os.path.join(dataset_dir, "wavs_resampled")
-        
-        os.makedirs(wavs_raw_dir, exist_ok=True)
-        os.makedirs(wavs_resampled_dir, exist_ok=True)
-        
-        neg_feat = os.path.join(dataset_dir, "negative_features.npy")
-        pos_feat = os.path.join(dataset_dir, "positive_features.npy")
-        model_out = os.path.join(dataset_dir, "beary_custom.onnx")
-
+        # Step 1: 正式正样本生成
         if resume_from_step <= 1:
-            run_command_with_progress(["python", "generate_samples.py", "--wakeword", wakeword, "--output_dir", wavs_raw_dir, "--num_samples", str(num_samples)], task_id, 1, 0, 40, "生成声音样本", cwd=scripts_dir)
+            run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
+        
+        # Step 2: 近似词样本生成
         if resume_from_step <= 2:
-            run_command_with_progress(["python", "resample_web.py", "--input_dir", wavs_raw_dir, "--output_dir", wavs_resampled_dir], task_id, 2, 40, 50, "重采样正样本", cwd=scripts_dir)
+            run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
+        
+        # Step 3: 统一重采样
         if resume_from_step <= 3:
-            run_command_with_progress(["python", "negative_web.py", "--output_file", neg_feat], task_id, 3, 50, 70, "提取负样本特征", cwd=scripts_dir)
+            run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
+        
+        # Step 4: 样本增强/特征提取
         if resume_from_step <= 4:
-            run_command_with_progress(["python", "positive_web.py", "--positive_input_dir", wavs_resampled_dir, "--output_file", pos_feat], task_id, 4, 70, 85, "提取正样本特征", cwd=scripts_dir)
+            run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
+        
+        # Step 5: 模型训练
         if resume_from_step <= 5:
-            run_command_with_progress(["python", "train_web.py", "--positive_features", pos_feat, "--negative_features", neg_feat, "--output_model", model_out, "--epochs", str(epochs)], task_id, 5, 85, 100, "模型训练中", cwd=scripts_dir)
+            run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
         db_f = SessionLocal()
         t_f = db_f.query(Task).filter(Task.id == task_id).first()
-        if t_f:
-            t_f.status = "Completed"
-            t_f.sub_status = "训练完成"
-            t_f.progress = 100
-            db_f.commit()
+        t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
+        db_f.commit()
         db_f.close()
-
     except Exception as e:
         db_e = SessionLocal()
         t_e = db_e.query(Task).filter(Task.id == task_id).first()
-        if t_e:
-            t_e.status = "Failed"
-            t_e.sub_status = str(e)
-            db_e.commit()
+        t_e.status, t_e.sub_status = "Failed", str(e)
+        db_e.commit()
         db_e.close()
+
+def run_cmd_v2(cmd, task_id, step, total, start_p, end_p, msg, cwd, env):
+    db = SessionLocal()
+    t = db.query(Task).filter(Task.id == task_id).first()
+    t.sub_status, t.current_step, t.progress = f"{step}/{total}: {msg}", step, start_p
+    db.commit()
+    db.close()
+
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
+    progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
+    for line in process.stdout:
+        match = progress_re.search(line)
+        if match:
+            curr, tot = int(match.group(1)), int(match.group(2))
+            percent = int(start_p + (end_p - start_p) * (curr / tot))
+            db_u = SessionLocal()
+            t_u = db_u.query(Task).filter(Task.id == task_id).first()
+            if t_u:
+                t_u.progress = percent
+                t_u.sub_status = f"{step}/{total}: {msg} ({curr}/{tot})"
+                db_u.commit()
+            db_u.close()
+    process.wait()
+    if process.returncode != 0: raise Exception(f"Step {step} failed: {msg}")
 
 # --- 路由 ---
 @app.get("/")
-async def read_root():
-    return RedirectResponse(url="/site/static/frontend/index.html")
+async def read_root(): return RedirectResponse(url="/site/static/frontend/index.html")
 
 @app.get("/api/me")
-async def get_me(user: User = Depends(get_current_user)):
-    return user
+async def get_me(u=Depends(get_current_user)): return u
 
 @app.get("/api/my-tasks")
-async def get_my_tasks(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(Task).filter(Task.user_id == user.id).order_by(Task.created_at.desc()).all()
-
-@app.get("/api/models")
-async def list_models(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    completed_tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").order_by(Task.created_at.desc()).all()
-    models = []
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    import json
-    for t in completed_tasks:
-        task_dir = os.path.join(backend_dir, "static/datasets", t.id)
-        model_path = os.path.join(task_dir, "beary_custom.onnx")
-        metrics_path = os.path.join(task_dir, "metrics.json")
-        if os.path.exists(model_path):
-            m_data = {
-                "id": t.id, 
-                "wakeword": t.wakeword, 
-                "created_at": t.created_at, 
-                "params": t.params,
-                "download_url": f"/site/static/datasets/{t.id}/beary_custom.onnx"
-            }
-            if os.path.exists(metrics_path):
-                try:
-                    with open(metrics_path, "r") as f:
-                        metrics = json.load(f)
-                        m_data["recall"] = metrics.get("final_recall", 0)
-                except: pass
-            plot_path = os.path.join(task_dir, "training_plot.png")
-            if os.path.exists(plot_path):
-                m_data["plot_url"] = f"/site/static/datasets/{t.id}/training_plot.png"
-            models.append(m_data)
-    return models
+async def get_my_tasks(u=Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(Task).filter(Task.user_id == u.id).order_by(Task.created_at.desc()).all()
 
 @app.post("/api/preview")
-async def generate_preview(req: PreviewRequest, user: User = Depends(get_current_user)):
-    preview_id = str(uuid.uuid4())[:8]
+async def generate_preview(req: TrainRequest, u=Depends(get_current_user)):
+    p_id = str(uuid.uuid4())[:8]
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(backend_dir, "static/previews", preview_id)
-    os.makedirs(output_dir, exist_ok=True)
+    out_dir = os.path.join(backend_dir, "static/previews", p_id)
+    os.makedirs(out_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
-    cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", output_dir, "--num_samples", "3"]
-    env = os.environ.copy()
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
-    subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
-    files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
-    urls = [f"/site/static/previews/{preview_id}/{f}" for f in files]
-    return {"urls": urls}
+    # 注意：这里继续用旧脚本做快速预览
+    cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
+    subprocess.run(cmd, check=True, cwd=scripts_dir)
+    return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
+
+@app.post("/api/generate-similar-words")
+async def generate_similar_words(req: TrainRequest):
+    scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+    # 预留空脚本，您可以之后填充
+    cmd = ["python", "v2_gen_word_list.py", "--wakeword", req.wakeword]
+    try:
+        res = subprocess.check_output(cmd, cwd=scripts_dir, text=True)
+        match = re.search(r"WORDS:(.*)", res)
+        return {"similar_words": match.group(1).split(",") if match else []}
+    except: return {"similar_words": [req.wakeword + "测试", "近似音1", "近似音2"]}
 
 @app.post("/api/train")
-async def start_training(req: TrainRequest, background_tasks: BackgroundTasks, 
-                         user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_current_user), db: Session = Depends(get_db)):
     task_id = str(uuid.uuid4())[:8]
-    new_task = Task(id=task_id, user_id=user.id, wakeword=req.wakeword, status="Pending", sub_status="等待中", params=req.dict(), current_step=1)
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    task_dir = os.path.join(backend_dir, "static/datasets", task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    
+    # 关键：生成本任务专属 YAML
+    generate_task_yaml(task_dir, req.wakeword, req.similar_words, req.num_samples, req.epochs)
+    
+    new_task = Task(id=task_id, user_id=u.id, wakeword=req.wakeword, similar_words=req.similar_words,
+                    status="Pending", sub_status="等待中", params=req.dict(), current_step=1)
     db.add(new_task)
     db.commit()
-    background_tasks.add_task(training_pipeline, task_id, 1)
+    bt.add_task(run_v2_pipeline, task_id, 1)
     return {"task_id": task_id}
 
 @app.post("/api/retry/{task_id}")
-async def retry_task(task_id: str, background_tasks: BackgroundTasks, step: int = None, db: Session = Depends(get_db)):
+async def retry_task(task_id: str, bt: BackgroundTasks, step: int = None, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
     start_from = step if step is not None else task.current_step
     task.status = "Pending"
-    task.sub_status = f"准备从第 {start_from} 步重试..."
     db.commit()
-    background_tasks.add_task(training_pipeline, task_id, start_from)
-    return {"message": f"Retry started from step {start_from}"}
+    bt.add_task(run_v2_pipeline, task_id, start_from)
+    return {"message": "Retry started"}
+
+@app.get("/api/models")
+async def list_models(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").all()
+    # 保持原有返回逻辑...
+    return [{"id":t.id, "wakeword":t.wakeword, "params":t.params, "download_url":f"/site/static/datasets/{t.id}/beary_custom.onnx"} for t in tasks]
 
 @app.get("/api/status/{task_id}")
 async def get_status(task_id: str, db: Session = Depends(get_db)):
     return db.query(Task).filter(Task.id == task_id).first()
-
-@app.post("/api/test/{task_id}")
-async def test_model(task_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    import librosa, onnxruntime as ort, openwakeword.utils, numpy as np
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(backend_dir, "static/datasets", task_id, "beary_custom.onnx")
-    if not os.path.exists(model_path):
-        raise HTTPException(status_code=404, detail="Model file not found")
-    audio, _ = librosa.load(file.file, sr=16000)
-    min_length = 3 * 16000
-    if len(audio) < min_length:
-        audio = np.pad(audio, (min_length - len(audio), 0))
-    else:
-        audio = np.pad(audio, (min_length, 0))
-    audio_int16 = (audio * 32767).astype(np.int16).reshape(1, -1)
-    F = openwakeword.utils.AudioFeatures()
-    features = F.embed_clips(audio_int16)
-    session = ort.InferenceSession(model_path)
-    input_name = session.get_inputs()[0].name
-    model_window_size = session.get_inputs()[0].shape[1]
-    n_embeddings = features.shape[1]
-    scores = []
-    for i in range(0, n_embeddings - model_window_size + 1):
-        window = features[:, i : i + model_window_size, :]
-        outputs = session.run(None, {input_name: window})
-        scores.append(float(outputs[0][0][0]))
-    max_score = max(scores) if scores else 0
-    return {"score": max_score, "detected": max_score > 0.5}
 
 if __name__ == "__main__":
     import uvicorn

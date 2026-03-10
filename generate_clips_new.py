@@ -197,7 +197,7 @@ if n_current_samples <= 0.95*config["n_samples"]:
             N=config["n_samples"]//len(target_phrases)))
     generate_samples(text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
 
-                     batch_size=config["tts_batch_size"]//7,
+                     batch_size=config["tts_batch_size"],
                      output_dir=negative_train_output_dir,
                      file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
                      )
@@ -219,7 +219,7 @@ if n_current_samples <= 0.95*config["n_samples_val"]:
             N=config["n_samples_val"]//len(target_phrases)))
     generate_samples(text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
 
-                     batch_size=config["tts_batch_size"]//7,
+                     batch_size=config["tts_batch_size"],
                      output_dir=negative_test_output_dir)
     if DEVICE == "cuda": torch.cuda.empty_cache()
 else:
