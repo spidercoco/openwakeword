@@ -50,7 +50,7 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
-# --- 依赖与鉴权 (必须放在路由定义之前) ---
+# --- 依赖与鉴权 ---
 def get_db():
     db = SessionLocal()
     try: yield db
@@ -74,6 +74,14 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
             db.refresh(user)
     return user
 
+# --- Pydantic 模型 ---
+class PreviewRequest(BaseModel):
+    wakeword: str
+    speaker: Optional[str] = "vivian"
+
+class SimilarWordsRequest(BaseModel):
+    wakeword: str
+
 class TrainRequest(BaseModel):
     wakeword: str
     similar_words: List[str]
@@ -90,7 +98,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- 业务逻辑：生成任务 YAML ---
 def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], num_samples: int, epochs: int):
-    config = {
+    config_data = {
         "target_phrase": wakeword,
         "similar_phrases": similar_words,
         "n_samples": num_samples,
@@ -101,7 +109,7 @@ def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], n
         "output_dir": "./" 
     }
     with open(os.path.join(task_dir, "config.yaml"), "w") as f:
-        yaml.dump(config, f)
+        yaml.dump(config_data, f)
 
 # --- 核心流水线重构 ---
 def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
@@ -183,7 +191,7 @@ async def get_my_tasks(u=Depends(get_current_user), db: Session = Depends(get_db
     return db.query(Task).filter(Task.user_id == u.id).order_by(Task.created_at.desc()).all()
 
 @app.post("/api/preview")
-async def generate_preview(req: TrainRequest, u=Depends(get_current_user)):
+async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
     p_id = str(uuid.uuid4())[:8]
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(backend_dir, "static/previews", p_id)
@@ -194,7 +202,7 @@ async def generate_preview(req: TrainRequest, u=Depends(get_current_user)):
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
 @app.post("/api/generate-similar-words")
-async def generate_similar_words(req: TrainRequest):
+async def generate_similar_words(req: SimilarWordsRequest):
     scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
     cmd = ["python", "v2_gen_word_list.py", "--wakeword", req.wakeword]
     try:
