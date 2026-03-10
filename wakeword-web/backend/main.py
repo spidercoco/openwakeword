@@ -23,7 +23,7 @@ ALGORITHM = "HS256"
 BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 
-# 特殊环境配置
+# 明确定义 Conda 环境名称
 TRAIN_CONDA_ENV = "oww_train"
 
 # --- 数据库模型 ---
@@ -53,28 +53,6 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
-# --- Pydantic 模型 ---
-class PreviewRequest(BaseModel):
-    wakeword: str
-    speaker: Optional[str] = "vivian"
-
-class SimilarWordsRequest(BaseModel):
-    wakeword: str
-
-class TrainRequest(BaseModel):
-    wakeword: str
-    similar_words: List[str]
-    num_samples: int
-    epochs: int
-
-app = FastAPI(root_path=BASE_PREFIX)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
-
-os.makedirs("static/previews", exist_ok=True)
-os.makedirs("static/datasets", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 # --- 依赖与鉴权 ---
 def get_db():
     db = SessionLocal()
@@ -99,6 +77,28 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
             db.refresh(user)
     return user
 
+# --- Pydantic 模型 ---
+class PreviewRequest(BaseModel):
+    wakeword: str
+    speaker: Optional[str] = "vivian"
+
+class SimilarWordsRequest(BaseModel):
+    wakeword: str
+
+class TrainRequest(BaseModel):
+    wakeword: str
+    similar_words: List[str]
+    num_samples: int
+    epochs: int
+
+app = FastAPI(root_path=BASE_PREFIX)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+os.makedirs("static/previews", exist_ok=True)
+os.makedirs("static/datasets", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # --- 执行工具 ---
 def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, start_progress: int, end_progress: int, sub_status_msg: str, cwd: str = None, env: dict = None):
     db = SessionLocal()
@@ -110,13 +110,18 @@ def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, st
         db.commit()
     db.close()
 
-    print(f"Executing Step {step_num}: {' '.join(cmd)}")
+    # 明确打印出执行的完整命令，方便确认 conda 环境
+    print(f"[{task_id}] Executing Step {step_num}: {' '.join(cmd)}")
+    
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
     
     progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
     for line in process.stdout:
-        print(f"[{task_id}] {line.strip()}")
-        match = progress_re.search(line)
+        stripped_line = line.strip()
+        # 将子进程的所有输出实时打印到后端控制台
+        print(f"[{task_id}][S{step_num}] {stripped_line}")
+        
+        match = progress_re.search(stripped_line)
         if match:
             current = int(match.group(1))
             total = int(match.group(2))
@@ -189,10 +194,11 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
         if resume_from_step <= 4:
             run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
         
-        # Step 5: 模型训练 (特殊：指定 conda 环境)
+        # Step 5: 模型训练 (强制使用 oww_train 环境)
         if resume_from_step <= 5:
-            cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path]
-            run_cmd_v2(cmd, task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+            # 显式使用全局变量 TRAIN_CONDA_ENV
+            train_cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path]
+            run_cmd_v2(train_cmd, task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
         db_f = SessionLocal()
         t_f = db_f.query(Task).filter(Task.id == task_id).first()
@@ -227,11 +233,9 @@ async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
     os.makedirs(out_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
     cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
-    
     env = os.environ.copy()
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
-    
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
