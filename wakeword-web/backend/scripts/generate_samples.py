@@ -14,7 +14,7 @@ except ImportError:
     exit(1)
 
 # ================= 配置 =================
-MODEL_PATH = "/Users/jingyehuang/.cache/modelscope/hub/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_PATH = "/data/model/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
 # 预设音色
