@@ -51,7 +51,6 @@
         .test-score { text-align: center; margin-top: 1.5rem; min-height: 80px; }
         .score-val { font-size: 2.5rem; font-weight: 800; color: var(--primary); transition: all 0.2s; }
         .detected-alert { background: var(--success); color: white; padding: 1rem; border-radius: 8px; margin-top: 1rem; text-align: center; animation: slideIn 0.3s; }
-        
         .word-tag { display: inline-flex; align-items: center; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 0.4rem 0.8rem; border-radius: 8px; margin: 0.3rem; gap: 0.5rem; }
         .word-delete { cursor: pointer; color: #94a3b8; font-weight: bold; }
         .word-delete:hover { color: #ef4444; }
@@ -88,8 +87,9 @@
 
             const BASE = "/site";
             const API = `${BASE}/api`;
-            // 更新为 4 步流水线
-            const ALL_STEPS = ["正式样本", "近似词样本", "样本增强", "模型训练"];
+            
+            // 前端只展示 4 个关键点 (重采样在后台进行)
+            const DISPLAY_STEPS = ["正式样本", "近似样本", "样本增强", "模型训练"];
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
@@ -173,59 +173,29 @@
                 setLoading(false);
             };
 
-            const handleRetry = async (taskId, stepNum) => {
-                if (!window.confirm(`确定要从第 ${stepNum} 步开始重试吗？`)) return;
-                const res = await fetch(`${API}/retry/${taskId}?step=${stepNum}`, { method: 'POST' });
+            const handleRetry = async (taskId, displayStep) => {
+                // 将前端展示步数 (1-4) 映射回后端逻辑步数 (1-5)
+                const stepMap = { 1: 1, 2: 2, 3: 4, 4: 5 }; 
+                const backendStep = stepMap[displayStep];
+                if (!window.confirm(`确定要从步骤 "${DISPLAY_STEPS[displayStep-1]}" 重试吗？`)) return;
+                const res = await fetch(`${API}/retry/${taskId}?step=${backendStep}`, { method: 'POST' });
                 if (res.ok) { fetchTasks(); }
             };
 
-            const toggleListening = async () => { if (isListening) { stopListening(); } else { startListening(); } };
-
-            const startListening = async () => {
-                setIsDetected(false); setCurrentScore(0);
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder.current = new MediaRecorder(stream);
-                    mediaRecorder.current.ondataavailable = (e) => { if (e.data.size > 0) sendChunk(e.data); };
-                    mediaRecorder.current.start(1500); 
-                    setIsListening(true);
-                } catch (e) { alert("Microphone access denied."); }
-            };
-
-            const stopListening = () => {
-                if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
-                    mediaRecorder.current.stop();
-                    mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
-                }
-                setIsListening(false); setCurrentScore(0); setIsDetected(false);
-            };
-
-            const sendChunk = async (blob) => {
-                const formData = new FormData();
-                formData.append('file', blob, 'chunk.wav');
-                try {
-                    const res = await fetch(`${API}/test/${testingModel.id}`, {
-                        method: 'POST',
-                        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-                        body: formData
-                    });
-                    const result = await res.json();
-                    setCurrentScore(result.score);
-                    if (result.detected) { triggerDetected(); }
-                } catch(e) { console.error("Chunk test failed", e); }
-            };
-
-            const triggerDetected = () => {
-                setIsDetected(true);
-                if (detectedTimeout.current) clearTimeout(detectedTimeout.current);
-                detectedTimeout.current = setTimeout(() => setIsDetected(false), 2000);
-                try { new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg").play(); } catch(e){}
-            };
-
-            const getTaskStep = (subStatus) => {
-                if (!subStatus) return 0;
-                const match = subStatus.match(/(\d)\/4/); // 对应后端的 4 步
-                return match ? parseInt(match[1]) : 0;
+            const getDisplayStepInfo = (subStatus) => {
+                if (!subStatus) return { current: 0, total: 4 };
+                const match = subStatus.match(/(\d)\/5/);
+                if (!match) return { current: 0, total: 4 };
+                const backendStep = parseInt(match[1]);
+                
+                // 映射逻辑：
+                // 1/5 -> 点 1
+                // 2/5 -> 点 2
+                // 3/5 -> 点 2 (重采样时点不移动，保持在近似样本)
+                // 4/5 -> 点 3
+                // 5/5 -> 点 4
+                const displayMap = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 4 };
+                return { current: displayMap[backendStep] || 0, total: 4 };
             };
 
             if (!user) return (
@@ -299,7 +269,6 @@
                                     {uiStep === 2 && (
                                         <div>
                                             <div className="step-header"><h2>Step 2: Verify Similar Words</h2></div>
-                                            <p style={{color: '#64748b', marginBottom: '1.5rem'}}>Remove words that don't sound similar enough.</p>
                                             <div style={{marginBottom: '2rem'}}>
                                                 {similarWords.map(word => (
                                                     <div key={word} className="word-tag">
@@ -337,7 +306,7 @@
                                     <h3 style={{marginTop: 0}}>Running Tasks</h3>
                                     {tasks.length === 0 && <p style={{color: '#94a3b8'}}>No active tasks.</p>}
                                     {tasks.map(t => {
-                                        const currentStep = getTaskStep(t.sub_status);
+                                        const { current: currentStep } = getDisplayStepInfo(t.sub_status);
                                         return (
                                             <div key={t.id} className="task-item">
                                                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
@@ -355,7 +324,7 @@
                                                     ))}
                                                 </div>
                                                 <div className="step-names">
-                                                    {ALL_STEPS.map((name, idx) => (<div key={idx} className={`step-name ${idx+1===currentStep ? 'active' : ''}`}>{name}</div>))}
+                                                    {DISPLAY_STEPS.map((name, idx) => (<div key={idx} className={`step-name ${idx+1===currentStep ? 'active' : ''}`}>{name}</div>))}
                                                 </div>
                                             </div>
                                         );
