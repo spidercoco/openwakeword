@@ -23,6 +23,9 @@ ALGORITHM = "HS256"
 BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 
+# 特殊环境配置
+TRAIN_CONDA_ENV = "oww_train"
+
 # --- 数据库模型 ---
 Base = declarative_base()
 
@@ -50,6 +53,28 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
+# --- Pydantic 模型 ---
+class PreviewRequest(BaseModel):
+    wakeword: str
+    speaker: Optional[str] = "vivian"
+
+class SimilarWordsRequest(BaseModel):
+    wakeword: str
+
+class TrainRequest(BaseModel):
+    wakeword: str
+    similar_words: List[str]
+    num_samples: int
+    epochs: int
+
+app = FastAPI(root_path=BASE_PREFIX)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+os.makedirs("static/previews", exist_ok=True)
+os.makedirs("static/datasets", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # --- 依赖与鉴权 ---
 def get_db():
     db = SessionLocal()
@@ -74,27 +99,39 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
             db.refresh(user)
     return user
 
-# --- Pydantic 模型 ---
-class PreviewRequest(BaseModel):
-    wakeword: str
-    speaker: Optional[str] = "vivian"
+# --- 执行工具 ---
+def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, start_progress: int, end_progress: int, sub_status_msg: str, cwd: str = None, env: dict = None):
+    db = SessionLocal()
+    t = db.query(Task).filter(Task.id == task_id).first()
+    if t:
+        t.sub_status = f"{step_num}/{total_steps}: {sub_status_msg}"
+        t.current_step = step_num
+        t.progress = start_progress
+        db.commit()
+    db.close()
 
-class SimilarWordsRequest(BaseModel):
-    wakeword: str
-
-class TrainRequest(BaseModel):
-    wakeword: str
-    similar_words: List[str]
-    num_samples: int
-    epochs: int
-
-app = FastAPI(root_path=BASE_PREFIX)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
-
-os.makedirs("static/previews", exist_ok=True)
-os.makedirs("static/datasets", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+    print(f"Executing Step {step_num}: {' '.join(cmd)}")
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
+    
+    progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
+    for line in process.stdout:
+        print(f"[{task_id}] {line.strip()}")
+        match = progress_re.search(line)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            percent = int(start_progress + (end_progress - start_progress) * (current / total))
+            db_u = SessionLocal()
+            t_u = db_u.query(Task).filter(Task.id == task_id).first()
+            if t_u:
+                t_u.progress = percent
+                t_u.sub_status = f"{step_num}/{total_steps}: {sub_status_msg} ({current}/{total})"
+                db_u.commit()
+            db_u.close()
+    
+    process.wait()
+    if process.returncode != 0:
+        raise Exception(f"Failed at stage {step_num}/{total_steps}: {sub_status_msg}")
 
 # --- 业务逻辑：生成任务 YAML ---
 def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], num_samples: int, epochs: int):
@@ -117,6 +154,10 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     t = db.query(Task).filter(Task.id == task_id).first()
     if not t: return
     
+    wakeword = t.wakeword
+    num_samples = t.params.get('num_samples', 100)
+    epochs = t.params.get('epochs', 50)
+    
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     scripts_dir = os.path.join(backend_dir, "scripts")
     task_dir = os.path.join(backend_dir, "static/datasets", task_id)
@@ -132,52 +173,40 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     db.close()
 
     try:
+        # Step 1: 正式正样本生成
         if resume_from_step <= 1:
             run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
+        
+        # Step 2: 近似词样本生成
         if resume_from_step <= 2:
             run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
+        
+        # Step 3: 统一重采样
         if resume_from_step <= 3:
             run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
+        
+        # Step 4: 样本增强/特征提取
         if resume_from_step <= 4:
             run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
+        
+        # Step 5: 模型训练 (特殊：指定 conda 环境)
         if resume_from_step <= 5:
-            run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+            cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path]
+            run_cmd_v2(cmd, task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
         db_f = SessionLocal()
         t_f = db_f.query(Task).filter(Task.id == task_id).first()
-        t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
-        db_f.commit()
+        if t_f:
+            t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
+            db_f.commit()
         db_f.close()
     except Exception as e:
         db_e = SessionLocal()
         t_e = db_e.query(Task).filter(Task.id == task_id).first()
-        t_e.status, t_e.sub_status = "Failed", str(e)
-        db_e.commit()
+        if t_e:
+            t_e.status, t_e.sub_status = "Failed", str(e)
+            db_e.commit()
         db_e.close()
-
-def run_cmd_v2(cmd, task_id, step, total, start_p, end_p, msg, cwd, env):
-    db = SessionLocal()
-    t = db.query(Task).filter(Task.id == task_id).first()
-    t.sub_status, t.current_step, t.progress = f"{step}/{total}: {msg}", step, start_p
-    db.commit()
-    db.close()
-
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
-    progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
-    for line in process.stdout:
-        match = progress_re.search(line)
-        if match:
-            curr, tot = int(match.group(1)), int(match.group(2))
-            percent = int(start_p + (end_p - start_p) * (curr / tot))
-            db_u = SessionLocal()
-            t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u:
-                t_u.progress = percent
-                t_u.sub_status = f"{step}/{total}: {msg} ({curr}/{tot})"
-                db_u.commit()
-            db_u.close()
-    process.wait()
-    if process.returncode != 0: raise Exception(f"Step {step} failed: {msg}")
 
 # --- 路由 ---
 @app.get("/")
@@ -198,7 +227,12 @@ async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
     os.makedirs(out_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
     cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
-    subprocess.run(cmd, check=True, cwd=scripts_dir)
+    
+    env = os.environ.copy()
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    
+    subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
 @app.post("/api/generate-similar-words")
