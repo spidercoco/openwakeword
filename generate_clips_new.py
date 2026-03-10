@@ -17,9 +17,13 @@ from tqdm import tqdm
 import yaml
 from pathlib import Path
 import openwakeword
-from openwakeword.data import generate_adversarial_texts, augment_clips, mmap_batch_generator
+from openwakeword.data import augment_clips, mmap_batch_generator
 from openwakeword.utils import compute_features_from_generator
 from openwakeword.utils import AudioFeatures
+
+# Mock generate_adversarial_texts
+def generate_adversarial_texts(input_text, N, **kwargs):
+    return [input_text] * N
 
 try:
     from qwen_tts import Qwen3TTSModel
@@ -28,7 +32,7 @@ except ImportError:
     exit(1)
 
 # ================= Qwen3 TTS 配置 =================
-MODEL_PATH = "/Users/jingyehuang/.cache/modelscope/hub/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_PATH = "/data/model/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 PRESET_SPEAKERS = ["aiden", "dylan", "eric", "ono_anna", "ryan", "serena", "sohee", "uncle_fu", "vivian"]
 EMOTIONS = ["平静", "欢快", "温柔", "严肃", "兴奋", "充满活力", "坚定", "亲切"]
@@ -190,10 +194,9 @@ if n_current_samples <= 0.95*config["n_samples"]:
     for target_phrase in target_phrases:
         adversarial_texts.extend(generate_adversarial_texts(
             input_text=target_phrase,
-            N=config["n_samples"]//len(target_phrases),
-            include_partial_phrase=1.0,
-            include_input_words=0.2))
+            N=config["n_samples"]//len(target_phrases)))
     generate_samples(text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
+
                      batch_size=config["tts_batch_size"]//7,
                      output_dir=negative_train_output_dir,
                      file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
@@ -213,10 +216,9 @@ if n_current_samples <= 0.95*config["n_samples_val"]:
     for target_phrase in target_phrases:
         adversarial_texts.extend(generate_adversarial_texts(
             input_text=target_phrase,
-            N=config["n_samples_val"]//len(target_phrases),
-            include_partial_phrase=1.0,
-            include_input_words=0.2))
+            N=config["n_samples_val"]//len(target_phrases)))
     generate_samples(text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
+
                      batch_size=config["tts_batch_size"]//7,
                      output_dir=negative_test_output_dir)
     if DEVICE == "cuda": torch.cuda.empty_cache()
