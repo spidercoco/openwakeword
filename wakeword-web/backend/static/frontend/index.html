@@ -11,8 +11,11 @@
         :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; }
         body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
         .navbar { background: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
+        .nav-tabs { display: flex; gap: 2rem; margin-left: 2rem; flex: 1; }
+        .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .nav-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
         .layout { display: grid; grid-template-columns: 1fr 380px; gap: 2rem; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; }
         .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: #1e293b; }
         .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
         .badge.Completed { background: #dcfce7; color: #166534; }
@@ -31,6 +34,9 @@
         .status-text { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
         .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
         .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
+        .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
+        .model-card { border: 1px solid #e2e8f0; padding: 1.5rem; border-radius: 10px; transition: transform 0.2s; }
+        .model-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
@@ -41,28 +47,21 @@
         const App = () => {
             const [user, setUser] = useState(null);
             const [token, setToken] = useState(localStorage.getItem('token'));
+            const [activeTab, setActiveTab] = useState("train"); // "train" or "models"
             const [wakeword, setWakeword] = useState("");
             const [previews, setPreviews] = useState([]);
             const [similarWords, setSimilarWords] = useState([]);
             const [tasks, setTasks] = useState([]);
+            const [models, setModels] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [uiStep, setUiStep] = useState(1); // 1: Preview, 2: Similars, 3: Train
+            const [uiStep, setUiStep] = useState(1);
 
-            const getApiBase = () => {
-                const path = window.location.pathname;
-                if (path.startsWith('/site')) return '/site/api';
-                return '/api';
-            };
-            const API = getApiBase();
+            const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
 
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : Promise.reject())
-                .then(data => {
-                    setUser(data);
-                    setToken(t);
-                    localStorage.setItem('token', t);
-                })
+                .then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
                 .catch(() => logout());
             }, [API]);
 
@@ -74,16 +73,22 @@
                 .catch(() => {});
             }, [API]);
 
+            const fetchModels = useCallback((t) => {
+                if (!t) return;
+                fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }})
+                .then(r => r.ok ? r.json() : [])
+                .then(data => setModels(data))
+                .catch(() => {});
+            }, [API]);
+
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const urlToken = params.get('token');
                 if (urlToken) {
                     window.history.replaceState({}, "", window.location.pathname);
-                    fetchUser(urlToken);
-                    fetchTasks(urlToken);
+                    fetchUser(urlToken); fetchTasks(urlToken);
                 } else if (token) {
-                    fetchUser(token);
-                    fetchTasks(token);
+                    fetchUser(token); fetchTasks(token);
                 } else {
                     fetchUser('local-dev-mode'); 
                 }
@@ -91,10 +96,13 @@
 
             useEffect(() => {
                 const timer = setInterval(() => {
-                    if (token) fetchTasks(token);
+                    if (token) {
+                        fetchTasks(token);
+                        if (activeTab === "models") fetchModels(token);
+                    }
                 }, 4000);
                 return () => clearInterval(timer);
-            }, [token, fetchTasks]);
+            }, [token, activeTab, fetchTasks, fetchModels]);
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
@@ -115,6 +123,7 @@
 
             const handleGetSimilars = async () => {
                 setLoading(true);
+                setPreviews([]); // 清空预览音频减少界面冗余
                 try {
                     const res = await fetch(`${API}/generate-similar-words`, {
                         method: 'POST',
@@ -124,7 +133,10 @@
                     const data = await res.json();
                     setSimilarWords(data.similar_words || []);
                     setUiStep(2);
-                } catch (e) { alert("生成近似词失败"); }
+                } catch (e) { 
+                    console.error(e);
+                    alert("生成近似词失败，请检查网络或后端配置"); 
+                }
                 setLoading(false);
             };
 
@@ -160,7 +172,11 @@
             return (
                 <div>
                     <div className="navbar">
-                        <strong style={{fontSize: '1.2rem'}}>openwakeword 训练平台</strong>
+                        <strong style={{fontSize: '1.2rem', color: '#1e293b'}}>openwakeword 训练平台</strong>
+                        <div className="nav-tabs">
+                            <div className={`nav-tab ${activeTab === "train" ? "active" : ""}`} onClick={() => setActiveTab("train")}>训练任务</div>
+                            <div className={`nav-tab ${activeTab === "models" ? "active" : ""}`} onClick={() => { setActiveTab("models"); fetchModels(token); }}>模型库</div>
+                        </div>
                         <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
                             <span>{user.username}</span>
                             <img src={user.avatar_url} style={{width: 32, height: 32, borderRadius: '50%'}} />
@@ -169,76 +185,99 @@
                     </div>
 
                     <div className="layout">
-                        <div className="card">
-                            {uiStep === 1 && (
-                                <div>
-                                    <div className="step-header"><h2>第一步：生成预览样本</h2></div>
-                                    <label>自定义唤醒词</label>
-                                    <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
-                                    <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
-                                        {loading ? "正在由 Qwen3-TTS 生成..." : "生成预览样本"}
-                                    </button>
-                                    {previews.length > 0 && (
-                                        <div className="audio-preview">
-                                            {previews.map((url, i) => (
-                                                <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>
-                                            ))}
-                                            <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>
-                                                {loading ? "Qwen3.5-Plus 思考中..." : "效果不错，下一步"}
+                        <div className="main-content">
+                            {activeTab === "train" ? (
+                                <div className="card">
+                                    {uiStep === 1 && (
+                                        <div>
+                                            <div className="step-header"><h2>第一步：生成预览样本</h2></div>
+                                            <label>自定义唤醒词</label>
+                                            <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
+                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
+                                                {loading ? "正在由 Qwen3-TTS 生成..." : "生成预览样本"}
                                             </button>
+                                            {previews.length > 0 && (
+                                                <div className="audio-preview">
+                                                    {previews.map((url, i) => (
+                                                        <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>
+                                                    ))}
+                                                    <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>
+                                                        {loading ? "Qwen3.5-Plus 深度思考中..." : "效果不错，下一步"}
+                                                    </button>                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {uiStep === 2 && (
+                                        <div>
+                                            <div className="step-header"><h2>第二步：生成对抗样本 (近似词)</h2></div>
+                                            <p>大模型已为您生成发音相似的词汇，用于降低误触发：</p>
+                                            <div className="tag-list">
+                                                {similarWords.map((w, i) => <span key={i} className="tag">{w}</span>)}
+                                            </div>
+                                            <button onClick={() => setUiStep(3)} className="btn-primary">确认词汇，继续下一步</button>
+                                            <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>重新生成</button>
+                                            <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
+                                        </div>
+                                    )}
+
+                                    {uiStep === 3 && (
+                                        <div>
+                                            <div className="step-header"><h2>第三步：最终训练配置</h2></div>
+                                            <p>唤醒词: <strong>{wakeword}</strong></p>
+                                            <p>干扰项数量: <strong>{similarWords.length}</strong> 个词汇</p>
+                                            <label>数据集规模 (合成样本数量): 2000</label>
+                                            <input type="range" disabled value="2000" />
+                                            <label>训练强度 (迭代轮数): 50</label>
+                                            <input type="range" disabled value="50" />
+                                            <button onClick={handleTrain} className="btn-primary" disabled={loading}>
+                                                {loading ? "任务准备中..." : "开始完整流水线 (约需 5-10 分钟)"}
+                                            </button>
+                                            <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
                                         </div>
                                     )}
                                 </div>
-                            )}
-
-                            {uiStep === 2 && (
-                                <div>
-                                    <div className="step-header"><h2>第二步：生成对抗样本 (近似词)</h2></div>
-                                    <p>大模型已为您生成发音相似的词汇，用于降低误触发：</p>
-                                    <div className="tag-list">
-                                        {similarWords.map((w, i) => <span key={i} className="tag">{w}</span>)}
+                            ) : (
+                                <div className="card">
+                                    <div className="step-header"><h2>我的模型库</h2></div>
+                                    {models.length === 0 && <p style={{color: '#94a3b8'}}>尚未有训练完成的模型。</p>}
+                                    <div className="model-grid">
+                                        {models.map(m => (
+                                            <div key={m.id} className="model-card">
+                                                <h3 style={{marginTop: 0}}>{m.wakeword}</h3>
+                                                <div style={{fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem'}}>
+                                                    <div>任务 ID: {m.id}</div>
+                                                    <div>参数: {m.params.num_samples} 样本 / {m.params.epochs} 轮</div>
+                                                </div>
+                                                <button onClick={() => window.open(m.download_url)} className="btn-primary" style={{background: '#10b981'}}>下载 .onnx 模型</button>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <button onClick={() => setUiStep(3)} className="btn-primary">确认词汇，继续下一步</button>
-                                    <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>重新生成</button>
-                                    <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
-                                </div>
-                            )}
-
-                            {uiStep === 3 && (
-                                <div>
-                                    <div className="step-header"><h2>第三步：最终训练配置</h2></div>
-                                    <p>唤醒词: <strong>{wakeword}</strong></p>
-                                    <p>干扰项数量: <strong>{similarWords.length}</strong> 个词汇</p>
-                                    <label>数据集规模 (合成样本数量): 2000</label>
-                                    <input type="range" disabled value="2000" />
-                                    <label>训练强度 (迭代轮数): 50</label>
-                                    <input type="range" disabled value="50" />
-                                    <button onClick={handleTrain} className="btn-primary" disabled={loading}>
-                                        {loading ? "任务准备中..." : "开始完整流水线 (约需 5-10 分钟)"}
-                                    </button>
-                                    <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
                                 </div>
                             )}
                         </div>
 
-                        <div className="card" style={{padding: '1.5rem'}}>
-                            <h3>任务进度看板</h3>
-                            {tasks.length === 0 && <p style={{color: '#94a3b8'}}>暂无训练记录。</p>}
-                            {tasks.map(t => (
-                                <div key={t.id} className="task-item">
-                                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                                        <strong>{t.wakeword}</strong>
-                                        <span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span>
+                        <div className="side-bar">
+                            <div className="card" style={{padding: '1.5rem'}}>
+                                <h3>任务进度看板</h3>
+                                {tasks.length === 0 && <p style={{color: '#94a3b8'}}>暂无训练记录。</p>}
+                                {tasks.map(t => (
+                                    <div key={t.id} className="task-item">
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                            <strong>{t.wakeword}</strong>
+                                            <span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span>
+                                        </div>
+                                        <div className="progress-bar">
+                                            <div className="progress-fill" style={{width: `${t.progress || 0}%`}}></div>
+                                        </div>
+                                        <div className="status-text">{t.sub_status || '等待中...'}</div>
+                                        <div style={{fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem'}}>
+                                            {t.created_at ? new Date(t.created_at).toLocaleString() : ''}
+                                        </div>
                                     </div>
-                                    <div className="progress-bar">
-                                        <div className="progress-fill" style={{width: `${t.progress || 0}%`}}></div>
-                                    </div>
-                                    <div className="status-text">{t.sub_status || '等待中...'}</div>
-                                    <div style={{fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem'}}>
-                                        {t.created_at ? new Date(t.created_at).toLocaleString() : ''}
-                                    </div>
-                                </div>
-                            ))}
+                                ))}
+                                <button onClick={() => fetchTasks(token)} className="btn-outline" style={{marginTop: '1rem', padding: '0.5rem'}}>手动刷新状态</button>
+                            </div>
                         </div>
                     </div>
                 </div>

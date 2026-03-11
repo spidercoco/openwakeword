@@ -261,17 +261,20 @@ async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
 @app.post("/api/generate-similar-words")
-async def generate_similar_words(req: SimilarWordsRequest):
+def generate_similar_words(req: SimilarWordsRequest):
     scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
     cmd = ["python", "v2_gen_word_list.py", "--wakeword", req.wakeword]
     try:
-        res = subprocess.check_output(cmd, cwd=scripts_dir, text=True)
+        # 在线程池中执行，不会阻塞主事件循环
+        res = subprocess.check_output(cmd, cwd=scripts_dir, text=True, timeout=120)
         match = re.search(r"WORDS:(.*)", res)
         if match:
             words = [w.strip() for w in match.group(1).split(",") if w.strip()]
             return {"similar_words": words}
         return {"similar_words": []}
-    except: return {"similar_words": [req.wakeword + "测试", "近似音1", "近似音2"]}
+    except Exception as e:
+        print(f"LLM Error: {e}")
+        return {"similar_words": ["测试词1", "测试词2", "测试词3"]}
 
 @app.post("/api/train")
 async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_current_user), db: Session = Depends(get_db)):
