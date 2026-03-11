@@ -8,13 +8,13 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; }
+        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; --error: #ef4444; }
         body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
         .navbar { background: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
         .nav-tabs { display: flex; gap: 2rem; margin-left: 2rem; flex: 1; }
         .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
         .nav-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-        .layout { display: grid; grid-template-columns: 1fr 380px; gap: 2rem; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 2rem; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; }
         .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: #1e293b; }
         .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
@@ -23,34 +23,28 @@
         .badge.Failed { background: #fee2e2; color: #991b1b; }
         input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
         .param-group { margin-bottom: 1.5rem; }
-        .param-info { display: flex; justify-content: space-between; font-size: 0.9rem; color: #475569; margin-bottom: 0.5rem; }
         input[type="range"] { height: 6px; -webkit-appearance: none; background: #e2e8f0; border-radius: 3px; outline: none; border: none; margin: 0.5rem 0; }
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--primary); border-radius: 50%; cursor: pointer; }
         button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
-        .audio-preview { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; background: #f1f5f9; padding: 1rem; border-radius: 8px; }
-        .task-item { padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
-        .progress-bar { height: 6px; background: #e2e8f0; border-radius: 3px; margin-top: 0.5rem; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s; }
-        .status-text { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; width: auto; height: auto; line-height: 1; }
+        .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
+        .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
+        .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.4rem 0; color: #64748b; }
+        .pipeline-step.active { color: var(--primary); font-weight: bold; }
+        .pipeline-step.done { color: var(--success); }
+        .pipeline-step.fail { color: var(--error); }
+        .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 2px; width: 60px; overflow: hidden; }
+        .progress-mini-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
         .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
-        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
-        .tag-remove { cursor: pointer; color: #94a3b8; font-weight: bold; }
-        .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
-        .model-card { border: 1px solid #e2e8f0; padding: 1.5rem; border-radius: 10px; transition: transform 0.2s; }
+        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal-content { background: white; padding: 2rem; border-radius: 12px; max-width: 500px; width: 90%; text-align: center; }
-        
-        /* 实时得分样式 */
-        .score-display { width: 150px; height: 150px; border-radius: 50%; border: 10px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 2rem auto; position: relative; transition: all 0.1s; }
-        .score-display.detected { border-color: var(--success); background: #ecfdf5; box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); transform: scale(1.05); }
-        .score-value { font-size: 2.5rem; font-weight: 800; color: #1e293b; }
-        .score-label { font-size: 0.8rem; color: #64748b; margin-top: -5px; }
-        .hit-counter { font-size: 1.2rem; font-weight: bold; color: var(--success); margin-bottom: 1rem; }
-        .mic-indicator { width: 12px; height: 12px; border-radius: 50%; background: #ef4444; display: inline-block; margin-right: 8px; animation: blink 1s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        .score-display { width: 120px; height: 120px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; position: relative; }
+        .score-display.detected { border-color: var(--success); background: #ecfdf5; animation: pulse 0.5s; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
@@ -71,7 +65,6 @@
             const [loading, setLoading] = useState(false);
             const [uiStep, setUiStep] = useState(1);
 
-            // 实时测试状态
             const [testModalOpen, setTestModalOpen] = useState(false);
             const [testingModel, setTestingModel] = useState(null);
             const [currentScore, setCurrentScore] = useState(0);
@@ -82,7 +75,6 @@
             const audioCtxRef = useRef(null);
             const processorRef = useRef(null);
 
-            // 训练参数
             const [numSamples, setNumSamples] = useState(500);
             const [trainSteps, setSteps] = useState(1000);
             const [layerSize, setLayerSize] = useState(32);
@@ -101,29 +93,23 @@
                 if (!t) return;
                 fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
-                .then(data => setTasks(data))
-                .catch(() => {});
+                .then(data => setTasks(data));
             }, [API]);
 
             const fetchModels = useCallback((t) => {
                 if (!t) return;
                 fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
-                .then(data => setModels(data))
-                .catch(() => {});
+                .then(data => setModels(data));
             }, [API]);
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
-                const urlToken = params.get('token');
+                const urlToken = params.get('token') || token;
                 if (urlToken) {
-                    window.history.replaceState({}, "", window.location.pathname);
+                    if (params.get('token')) window.history.replaceState({}, "", window.location.pathname);
                     fetchUser(urlToken); fetchTasks(urlToken);
-                } else if (token) {
-                    fetchUser(token); fetchTasks(token);
-                } else {
-                    fetchUser('local-dev-mode'); 
-                }
+                } else { fetchUser('local-dev-mode'); }
             }, []);
 
             useEffect(() => {
@@ -132,99 +118,70 @@
                         fetchTasks(token);
                         if (activeTab === "models") fetchModels(token);
                     }
-                }, 4000);
+                }, 3000);
                 return () => clearInterval(timer);
             }, [token, activeTab, fetchTasks, fetchModels]);
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
             const handleRetry = async (taskId, step) => {
-                try {
-                    const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (res.ok) {
-                        fetchTasks(token);
-                    } else {
-                        alert("重试请求失败");
-                    }
-                } catch (e) {
-                    alert("网络错误");
-                }
+                const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) fetchTasks(token);
             };
 
-            // --- 实时音频测试逻辑 ---
             const startLiveTest = async (model) => {
-                setTestingModel(model);
-                setTestModalOpen(true);
-                setHitCount(0);
-                setCurrentScore(0);
-
-                // 1. 建立 WebSocket
+                setTestingModel(model); setTestModalOpen(true); setHitCount(0); setCurrentScore(0);
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}${API}/ws/test-model/${model.id}`;
                 wsRef.current = new WebSocket(wsUrl);
-
                 wsRef.current.onmessage = (e) => {
                     const data = JSON.parse(e.data);
                     if (data.score !== undefined) {
-                        const score = data.score;
-                        setCurrentScore(score);
-                        if (score > 0.5) {
-                            setHitCount(prev => prev + 1);
-                            setIsDetected(true);
-                            setTimeout(() => setIsDetected(false), 600);
-                        }
+                        setCurrentScore(data.score);
+                        if (data.score > 0.5) { setHitCount(v => v + 1); setIsDetected(true); setTimeout(() => setIsDetected(false), 600); }
                     }
-                    if (data.error) alert("推理错误: " + data.error);
                 };
-
-                // 2. 开启麦克风
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: { 
-                        channelCount: 1,
-                        sampleRate: 16000,
-                        echoCancellation: true
-                    }});
-                    
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true }});
                     audioCtxRef.current = new AudioContext({ sampleRate: 16000 });
                     const source = audioCtxRef.current.createMediaStreamSource(stream);
-                    
-                    // 使用 ScriptProcessor 处理原始 PCM (16bit)
                     processorRef.current = audioCtxRef.current.createScriptProcessor(4096, 1, 1);
-                    
                     processorRef.current.onaudioprocess = (e) => {
-                        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                        if (wsRef.current?.readyState === WebSocket.OPEN) {
                             const inputData = e.inputBuffer.getChannelData(0);
-                            // 转换为 Int16
                             const pcmData = new Int16Array(inputData.length);
-                            for (let i = 0; i < inputData.length; i++) {
-                                pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                            }
+                            for (let i = 0; i < inputData.length; i++) pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
                             wsRef.current.send(pcmData.buffer);
                         }
                     };
-
                     source.connect(processorRef.current);
                     processorRef.current.connect(audioCtxRef.current.destination);
-                } catch (err) {
-                    alert("麦克风开启失败，请确保使用 Localhost 或 HTTPS 访问，并授予权限。");
-                    stopLiveTest();
-                }
+                } catch (err) { alert("麦克风启动失败"); stopLiveTest(); }
             };
 
             const stopLiveTest = () => {
-                if (wsRef.current) wsRef.current.close();
-                if (processorRef.current) processorRef.current.disconnect();
-                if (audioCtxRef.current) audioCtxRef.current.close();
-                setTestModalOpen(false);
-                setTestingModel(null);
+                wsRef.current?.close(); processorRef.current?.disconnect(); audioCtxRef.current?.close();
+                setTestModalOpen(false); setTestingModel(null);
             };
 
-            // 其他 Handle 函数保持不变...
-            const handlePreview = async () => { /* ... */ };
-            const handleGetSimilars = async () => { /* ... */ };
+            const handleGetSimilars = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API}/generate-similar-words`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ wakeword })
+                    });
+                    const data = await res.json();
+                    setSimilarWords(data.similar_words || []);
+                    setUiStep(2);
+                } catch (e) { alert("生成失败"); }
+                setLoading(false);
+            };
+
             const handleTrain = async () => {
                 setLoading(true);
                 try {
@@ -237,21 +194,35 @@
                             layer_size: parseInt(layerSize), aug_rounds: parseInt(augRounds)
                         })
                     });
-                    if (res.ok) {
-                        alert("训练任务已开始！");
-                        setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]);
-                        fetchTasks(token);
-                    }
+                    if (res.ok) { setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]); fetchTasks(token); }
                 } catch (e) { alert("提交失败"); }
                 setLoading(false);
             };
 
-            const getStatusLabel = (s) => {
-                const map = { 'Running': '进行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待中' };
-                return map[s] || s;
+            const StepItem = ({ task, stepNum, label }) => {
+                const isCurrent = task.current_step === stepNum && task.status === "Running";
+                const isDone = task.current_step > stepNum || task.status === "Completed";
+                const isFailed = task.current_step === stepNum && task.status === "Failed";
+                let statusIcon = "⚪";
+                let className = "pipeline-step";
+                if (isDone) { statusIcon = "✅"; className += " done"; }
+                else if (isCurrent) { statusIcon = "⏳"; className += " active"; }
+                else if (isFailed) { statusIcon = "❌"; className += " fail"; }
+
+                return (
+                    <div className={className}>
+                        <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                            <span>{statusIcon} {stepNum}. {label}</span>
+                            {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
+                        </div>
+                        {(task.status !== 'Running') && (
+                            <button onClick={() => handleRetry(task.id, stepNum)} className="btn-outline btn-sm">重试</button>
+                        )}
+                    </div>
+                );
             };
 
-            if (!user) return <div style={{display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}><h1>🐻 openwakeword 训练平台</h1><p>正在进入系统...</p></div>;
+            if (!user) return <div style={{display:'flex',height:'100vh',alignItems:'center',justifyContent:'center'}}><h1>🐻 openwakeword 训练平台</h1></div>;
 
             return (
                 <div>
@@ -261,10 +232,10 @@
                             <div className={`nav-tab ${activeTab === "train" ? "active" : ""}`} onClick={() => setActiveTab("train")}>训练任务</div>
                             <div className={`nav-tab ${activeTab === "models" ? "active" : ""}`} onClick={() => { setActiveTab("models"); fetchModels(token); }}>模型库</div>
                         </div>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
                             <span>{user.username}</span>
-                            <img src={user.avatar_url} style={{width: 32, height: 32, borderRadius: '50%'}} />
-                            <button onClick={logout} className="btn-outline" style={{width: 'auto', padding: '0.4rem 0.8rem'}}>退出</button>
+                            <img src={user.avatar_url} style={{width:32,height:32,borderRadius:'50%'}} />
+                            <button onClick={logout} className="btn-outline" style={{width:'auto',padding:'0.4rem 0.8rem'}}>退出</button>
                         </div>
                     </div>
 
@@ -288,15 +259,11 @@
                                                     setPreviews(data.urls || []);
                                                 } catch (e) { alert("预览失败"); }
                                                 setLoading(false);
-                                            }} className="btn-primary" disabled={!wakeword || loading}>
-                                                {loading && !previews.length ? "正在合成音频..." : "生成预览样本"}
-                                            </button>
+                                            }} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
                                                     {previews.map((url, i) => <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>)}
-                                                    <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>
-                                                        {loading ? "正在生成近似词..." : "效果不错，下一步"}
-                                                    </button>
+                                                    <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>{loading ? "深度思考中..." : "效果不错，下一步"}</button>
                                                 </div>
                                             )}
                                         </div>
@@ -304,30 +271,21 @@
                                     {uiStep === 2 && (
                                         <div>
                                             <div className="step-header"><h2>第二步：管理对抗样本</h2></div>
-                                            <div className="add-tag-box">
-                                                <input value={newWordInput} onChange={e => setNewWordInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && (()=>{
-                                                    const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w);
-                                                    setSimilarWords([...similarWords, ...words]);
-                                                    setNewWordInput("");
-                                                })()} placeholder="手动添加近似词，逗号分隔" style={{margin: 0}} />
-                                                <button onClick={() => {
-                                                    const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w);
-                                                    setSimilarWords([...similarWords, ...words]);
-                                                    setNewWordInput("");
-                                                }} className="btn-primary" style={{width: '100px'}}>添加</button>
-                                            </div>
+                                            <input value={newWordInput} onChange={e => setNewWordInput(e.target.value)} placeholder="手动添加近似词，逗号分隔" />
+                                            <button onClick={() => {
+                                                const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w);
+                                                setSimilarWords([...similarWords, ...words]); setNewWordInput("");
+                                            }} className="btn-primary" style={{marginBottom:'1rem'}}>添加</button>
                                             <div className="tag-list">
                                                 {similarWords.map((w, i) => <span key={i} className="tag">{w}<span style={{cursor:'pointer', opacity:0.5}} onClick={() => setSimilarWords(similarWords.filter((_, idx) => idx !== i))}> ×</span></span>)}
                                             </div>
-                                            <div style={{marginTop: '2rem'}}>
-                                                <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>确认词汇，下一步</button>
-                                                <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>换一批</button>
-                                            </div>
+                                            <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>确认词汇，下一步</button>
+                                            <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>换一批</button>
                                         </div>
                                     )}
                                     {uiStep === 3 && (
                                         <div>
-                                            <div className="step-header"><h2>第三步：最终训练配置</h2></div>
+                                            <div className="step-header"><h2>第三步：训练配置</h2></div>
                                             <div className="param-group"><span>样本数: {numSamples}</span><input type="range" min="100" max="5000" step="100" value={numSamples} onChange={e => setNumSamples(e.target.value)} /></div>
                                             <div className="param-group"><span>步数: {trainSteps}</span><input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(e.target.value)} /></div>
                                             <div className="param-group"><span>层大小</span><select value={layerSize} onChange={e => setLayerSize(e.target.value)}><option value="32">32</option><option value="64">64</option><option value="128">128</option></select></div>
@@ -344,8 +302,8 @@
                                             <div key={m.id} className="model-card">
                                                 <h3 style={{marginTop: 0}}>{m.wakeword}</h3>
                                                 <div style={{display: 'flex', gap: '0.5rem'}}>
-                                                    <button onClick={() => window.open(m.download_url)} className="btn-primary" style={{background: '#10b981'}}>下载</button>
-                                                    <button onClick={() => startLiveTest(m)} className="btn-outline">实时测试</button>
+                                                    <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981'}}>下载</button>
+                                                    <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm">实时测试</button>
                                                 </div>
                                             </div>
                                         ))}
@@ -356,42 +314,40 @@
 
                         <div className="side-bar">
                             <div className="card" style={{padding: '1.5rem'}}>
-                                <h3>任务看板</h3>
+                                <h3>任务进度看板</h3>
                                 {tasks.map(t => (
                                     <div key={t.id} className="task-item">
-                                        <div style={{display: 'flex', justifyContent: 'space-between'}}><strong>{t.wakeword}</strong><span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span></div>
-                                        <div className="progress-bar"><div className="progress-fill" style={{width: `${t.progress || 0}%`}}></div></div>
-                                        <div className="status-text">{t.sub_status}</div>
+                                        <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                                            <strong>{t.wakeword}</strong>
+                                            <span className={`badge ${t.status}`}>{t.status === "Completed" ? "已完成" : t.status === "Running" ? "运行中" : t.status === "Failed" ? "失败" : "等待"}</span>
+                                        </div>
                                         
-                                        {/* 重试按钮组 */}
-                                        {(t.status === 'Completed' || t.status === 'Failed') && (
-                                            <div style={{marginTop: '0.8rem', display: 'flex', gap: '0.4rem'}}>
-                                                <button onClick={() => handleRetry(t.id, 1)} style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem', width: 'auto'}} className="btn-outline">全部重试</button>
-                                                <button onClick={() => handleRetry(t.id, 5)} style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem', width: 'auto', borderColor: '#10b981', color: '#10b981'}} className="btn-outline">仅重试训练</button>
-                                            </div>
-                                        )}
+                                        <div className="pipeline-steps">
+                                            <StepItem task={t} stepNum={1} label="生成正样本" />
+                                            <StepItem task={t} stepNum={2} label="生成近似词样本" />
+                                            <StepItem task={t} stepNum={3} label="重采样音频" />
+                                            <StepItem task={t} stepNum={4} label="增强与特征提取" />
+                                            <StepItem task={t} stepNum={5} label="训练模型" />
+                                        </div>
+                                        
+                                        {t.status === "Failed" && <div style={{fontSize:'0.7rem', color:'var(--error)', marginTop:'8px'}}>错误: {t.sub_status}</div>}
                                     </div>
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    {/* 实时测试弹窗 */}
                     {testModalOpen && (
                         <div className="modal-overlay">
                             <div className="modal-content">
                                 <h3>正在测试: {testingModel.wakeword}</h3>
-                                <p><span className="mic-indicator"></span> 麦克风已开启，请尝试说出唤醒词</p>
-                                
-                                <div className="hit-counter">已命中次数: {hitCount}</div>
-                                
+                                <p><span className="mic-indicator"></span> 麦克风已开启</p>
+                                <div style={{fontSize:'1.2rem', fontWeight:'bold', color:'var(--success)'}}>命中次数: {hitCount}</div>
                                 <div className={`score-display ${isDetected ? 'detected' : ''}`}>
-                                    <span className="score-value">{(currentScore * 100).toFixed(0)}%</span>
-                                    <span className="score-label">置信度</span>
+                                    <span style={{fontSize:'2.5rem', fontWeight:800}}>{(currentScore * 100).toFixed(0)}%</span>
+                                    <span style={{fontSize:'0.8rem', color:'#64748b'}}>置信度</span>
                                 </div>
-
-                                <p style={{fontSize: '0.85rem', color: '#64748b'}}>提示：如果得分超过 50% 即视为命中。</p>
-                                <button onClick={stopLiveTest} className="btn-primary" style={{marginTop: '1.5rem', background: '#ef4444'}}>停止测试</button>
+                                <button onClick={stopLiveTest} className="btn-primary" style={{background: '#ef4444'}}>停止测试</button>
                             </div>
                         </div>
                     )}
