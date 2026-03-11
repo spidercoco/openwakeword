@@ -155,6 +155,13 @@ def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress
     if t: t.sub_status, t.current_step, t.progress = f"{sub_status_msg}", step_num, start_progress; db.commit()
     db.close()
     
+    # 打印执行记录
+    print(f"\n" + "="*60)
+    print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg}")
+    print(f"📁 Directory: {cwd}")
+    print(f"💻 Command: {' '.join(cmd)}")
+    print("="*60 + "\n")
+    
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
     
     # 后台持续监控文件数量
@@ -325,4 +332,15 @@ async def list_models(user=Depends(get_current_user), db: Session = Depends(get_
 
 if __name__ == "__main__":
     import uvicorn
+    # 启动前清理僵尸任务
+    db = SessionLocal()
+    stale_tasks = db.query(Task).filter(Task.status == "Running").all()
+    if stale_tasks:
+        print(f"Cleaning up {len(stale_tasks)} stale running tasks...")
+        for task in stale_tasks:
+            task.status = "Failed"
+            task.sub_status = "服务重启，任务已中断"
+        db.commit()
+    db.close()
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
