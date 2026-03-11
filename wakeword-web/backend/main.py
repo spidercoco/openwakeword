@@ -216,7 +216,8 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
         if resume_from_step <= 5:
             run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
-        db_f = SessionLocal()        t_f = db_f.query(Task).filter(Task.id == task_id).first()
+        db_f = SessionLocal()
+        t_f = db_f.query(Task).filter(Task.id == task_id).first()
         if t_f:
             t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
             db_f.commit()
