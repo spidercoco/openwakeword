@@ -29,7 +29,8 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
-        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; width: auto; height: auto; line-height: 1; }
+        .btn-retry { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; font-size: 1.1rem; }
+        .btn-retry:hover { border-color: var(--primary); color: var(--primary); background: #eff6ff; transform: rotate(90deg); }
         .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
         .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.4rem 0; color: #64748b; }
@@ -50,7 +51,7 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useRef } = React;
+        const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
         const App = () => {
             const [user, setUser] = useState(null);
@@ -81,6 +82,14 @@
             const [augRounds, setAugRounds] = useState(1);
 
             const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
+
+            // 任务排序逻辑：未完成在前
+            const sortedTasks = useMemo(() => {
+                return [...tasks].sort((a, b) => {
+                    const order = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
+                    return (order[a.status] || 99) - (order[b.status] || 99);
+                });
+            }, [tasks]);
 
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
@@ -212,11 +221,11 @@
                 return (
                     <div className={className}>
                         <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
-                            <span>{statusIcon} {stepNum}. {label}</span>
+                            <span>{statusIcon} {label}</span>
                             {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
                         </div>
                         {(task.status !== 'Running') && (
-                            <button onClick={() => handleRetry(task.id, stepNum)} className="btn-outline btn-sm">重试</button>
+                            <div className="btn-retry" title="从该步重试" onClick={() => handleRetry(task.id, stepNum)}>↻</div>
                         )}
                     </div>
                 );
@@ -315,7 +324,7 @@
                         <div className="side-bar">
                             <div className="card" style={{padding: '1.5rem'}}>
                                 <h3>任务进度看板</h3>
-                                {tasks.map(t => (
+                                {sortedTasks.map(t => (
                                     <div key={t.id} className="task-item">
                                         <div style={{display: 'flex', justifyContent: 'space-between'}}>
                                             <strong>{t.wakeword}</strong>
