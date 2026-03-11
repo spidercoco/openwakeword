@@ -27,7 +27,7 @@ WAKE_WORD_VARIATIONS = [
     "收到小熊"
 ]
 
-MODEL_PATH = "/Users/jingyehuang/.cache/modelscope/hub/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_PATH = "/Users/jingyehuang/.cache/modelscope/hub/models/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 OUTPUT_DIR = "wake_word_dataset_5000"
 DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 TOTAL_SAMPLES_TARGET = 5000

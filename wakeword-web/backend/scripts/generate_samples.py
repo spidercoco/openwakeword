@@ -5,6 +5,7 @@ import random
 import argparse
 import soundfile as sf
 import numpy as np
+import json
 from pathlib import Path
 
 try:
@@ -14,11 +15,20 @@ except ImportError:
     exit(1)
 
 # ================= 配置 =================
-MODEL_PATH = "/data/model/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_PATH = "/data/model/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
-# 预设音色
-PRESET_SPEAKERS = ["vivian", "serena", "uncle_fu", "dylan"]
+# 加载声音描述库
+VOICE_DATA = []
+try:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    voices_path = os.path.join(script_dir, "voices.json")
+    if os.path.exists(voices_path):
+        with open(voices_path, "r", encoding="utf-8") as f:
+            VOICE_DATA = json.load(f)
+        print(f"Loaded {len(VOICE_DATA)} voice prompts from {voices_path}")
+except Exception as e:
+    print(f"Error loading voices.json: {e}")
 
 # 语速指令映射
 SPEED_STYLES = [
@@ -26,6 +36,11 @@ SPEED_STYLES = [
     ("正常", "正常语速说话"),
     ("快速", "语速快一点地说话")
 ]
+
+def get_random_instruct():
+    if VOICE_DATA:
+        return random.choice(VOICE_DATA).get("prompt", "自然")
+    return "自然"
 
 def main():
     parser = argparse.ArgumentParser(description="Generate wake word samples with random speakers and specific speeds")
@@ -44,36 +59,39 @@ def main():
     print(f"Loading Qwen3-TTS on {DEVICE}...")
     model = Qwen3TTSModel.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=dtype, trust_remote_code=True)
 
-    print(f"Generating samples with random speakers and rotating speeds for: {args.wakeword}")
+    print(f"Generating samples with random speakers for: {args.wakeword}")
 
     count = 0
     while count < args.num_samples:
-        # 语速循环
-        style_name, speed_instruct = SPEED_STYLES[count % len(SPEED_STYLES)]
-        # 音色随机
-        speaker = random.choice(PRESET_SPEAKERS)
-        
         try:
-            # 合成音频
-            wavs, sr = model.generate_custom_voice(
+            # 随机音色指令
+            instruct = get_random_instruct()
+
+            # 使用 VoiceDesign 模式生成
+            wavs, sr = model.generate_voice_design(
                 text=[args.wakeword],
                 language=["Chinese"],
-                speaker=[speaker],
-                instruct=[speed_instruct]
+                instruct=[instruct]
             )
 
             audio_data = wavs[0].cpu().numpy() if torch.is_tensor(wavs[0]) else wavs[0]
             
             # 文件名包含语速和音色标识
             clean_text = args.wakeword.replace("，", "").replace(" ", "").replace("?", "")
-            file_id = f"spd_{style_name}_spk_{speaker}_{clean_text}_{uuid.uuid4().hex[:6]}"
+            file_id = f"{clean_text}_{uuid.uuid4().hex[:6]}"
             file_name = f"{file_id}.wav"
             
             sf.write(out_path / file_name, audio_data, sr)
             count += 1
             
             print(f"PROGRESS:{count}/{args.num_samples}")
-            print(f"[{count}/{args.num_samples}] Saved: {file_name} (Style: {style_name}, Speaker: {speaker})", flush=True)
+            print(f"[{count}/{args.num_samples}] Saved: {file_name}", flush=True)
+
+        except Exception as e:
+            print(f"Generation error: {e}")
+            continue
+
+    print(f"Success. Generated {count} samples in {args.output_dir}")
 
         except Exception as e:
             print(f"Generation error: {e}")

@@ -24,6 +24,7 @@ BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 
 # 训练环境配置
+TRAIN_CONDA_ENV = "oww_train"
 
 # --- 数据库模型 ---
 Base = declarative_base()
@@ -208,13 +209,15 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
         if resume_from_step <= 3:
             run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
 
-        # Step 4: 样本增强/特征提取
+        # Step 4: 样本增强/特征提取 (使用 oww_train 环境)
         if resume_from_step <= 4:
-            run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
+            cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path]
+            run_cmd_v2(cmd, task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
 
-        # Step 5: 模型训练
+        # Step 5: 模型训练 (使用 oww_train 环境)
         if resume_from_step <= 5:
-            run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+            cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path]
+            run_cmd_v2(cmd, task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
         db_f = SessionLocal()
         t_f = db_f.query(Task).filter(Task.id == task_id).first()
