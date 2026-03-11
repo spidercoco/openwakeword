@@ -202,7 +202,7 @@ async def websocket_test_model(websocket: WebSocket, task_id: str):
             data = await websocket.receive_bytes()
             chunk = np.frombuffer(data, dtype=np.int16)
             audio_buffer = np.append(audio_buffer, chunk)
-            if len(audio_buffer) >= 1280:
+            if len(audio_buffer) >= 20480:
                 audio_batch = audio_buffer.reshape(1, -1)
                 features = F.embed_clips(audio_batch)
                 if features.shape[1] >= model_window_size:
