@@ -30,24 +30,17 @@ try:
 except Exception as e:
     print(f"Error loading voices.json: {e}")
 
-# 语速指令映射
-SPEED_STYLES = [
-    ("慢速", "语速慢一点地说话"),
-    ("正常", "正常语速说话"),
-    ("快速", "语速快一点地说话")
-]
-
 def get_random_instruct():
     if VOICE_DATA:
         return random.choice(VOICE_DATA).get("prompt", "自然")
     return "自然"
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate wake word samples with random speakers and specific speeds")
+    parser = argparse.ArgumentParser(description="Generate wake word samples with random voices from json")
     parser.add_argument("--wakeword", type=str, required=True, help="The exact wake word to generate")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save generated samples")
     parser.add_argument("--num_samples", type=int, default=3, help="Total samples to generate")
-    parser.add_argument("--speaker", type=str, default=None, help="Ignored, will use random from presets")
+    parser.add_argument("--speaker", type=str, default=None, help="Ignored")
     
     args = parser.parse_args()
 
@@ -59,12 +52,12 @@ def main():
     print(f"Loading Qwen3-TTS on {DEVICE}...")
     model = Qwen3TTSModel.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=dtype, trust_remote_code=True)
 
-    print(f"Generating samples with random speakers for: {args.wakeword}")
+    print(f"Generating samples using random prompts from voices.json for: {args.wakeword}")
 
     count = 0
     while count < args.num_samples:
         try:
-            # 随机音色指令
+            # 随机从 JSON 中获取音色指令
             instruct = get_random_instruct()
 
             # 使用 VoiceDesign 模式生成
@@ -76,7 +69,7 @@ def main():
 
             audio_data = wavs[0].cpu().numpy() if torch.is_tensor(wavs[0]) else wavs[0]
             
-            # 文件名包含语速和音色标识
+            # 文件名逻辑
             clean_text = args.wakeword.replace("，", "").replace(" ", "").replace("?", "")
             file_id = f"{clean_text}_{uuid.uuid4().hex[:6]}"
             file_name = f"{file_id}.wav"
@@ -85,7 +78,7 @@ def main():
             count += 1
             
             print(f"PROGRESS:{count}/{args.num_samples}")
-            print(f"[{count}/{args.num_samples}] Saved: {file_name}", flush=True)
+            print(f"[{count}/{args.num_samples}] Saved: {file_name} with prompt: {instruct[:30]}...", flush=True)
 
         except Exception as e:
             print(f"Generation error: {e}")
