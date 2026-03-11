@@ -55,6 +55,8 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
+        const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
+
         const App = () => {
             const [user, setUser] = useState(null);
             const [token, setToken] = useState(localStorage.getItem('token'));
@@ -83,39 +85,38 @@
             const [layerSize, setLayerSize] = useState(32);
             const [augRounds, setAugRounds] = useState(1);
 
-            const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
-
-            // 严谨排序逻辑
             const sortedTasks = useMemo(() => {
-                const statusWeight = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
+                const order = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
                 return [...tasks].sort((a, b) => {
-                    const wA = statusWeight[a.status] ?? 99;
-                    const wB = statusWeight[b.status] ?? 99;
+                    const wA = order[a.status] ?? 99;
+                    const wB = order[b.status] ?? 99;
                     if (wA !== wB) return wA - wB;
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
             }, [tasks]);
+
+            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : Promise.reject())
                 .then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
                 .catch(() => logout());
-            }, [API]);
+            }, []);
 
             const fetchTasks = useCallback((t) => {
                 if (!t) return;
                 fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
                 .then(data => setTasks(data));
-            }, [API]);
+            }, []);
 
             const fetchModels = useCallback((t) => {
                 if (!t) return;
                 fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
                 .then(data => setModels(data));
-            }, [API]);
+            }, []);
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
@@ -135,8 +136,6 @@
                 }, 3000);
                 return () => clearInterval(timer);
             }, [token, activeTab, fetchTasks, fetchModels]);
-
-            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
             const handleRetry = async (taskId, step) => {
                 const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
@@ -211,6 +210,7 @@
                 setLoading(false);
             };
 
+            // 内部 StepItem 组件定义，确保闭包正确
             const StepItem = ({ task, stepNum, label }) => {
                 const isCurrent = task.current_step === stepNum && task.status === "Running";
                 const isDone = task.current_step > stepNum || task.status === "Completed";
@@ -220,6 +220,9 @@
                 else if (isCurrent) { statusIcon = "⏳"; className += " active"; }
                 else if (isFailed) { statusIcon = "❌"; className += " fail"; }
 
+                const match = isCurrent && task.sub_status ? task.sub_status.match(/\((.*?)\)/) : null;
+                const progressText = match ? match[1] : null;
+
                 return (
                     <div className={className}>
                         <div style={{flex: 1}}>
@@ -227,10 +230,9 @@
                                 <span>{statusIcon} {label}</span>
                                 {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
                             </div>
-                            {/* 显示具体进度数值：解析类似 "(150/500)" 的字符串 */}
-                            {isCurrent && task.sub_status && task.sub_status.includes("(") && (
-                                <div style={{fontSize: '0.75rem', color: var(--primary), marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
-                                    数量: {task.sub_status.substring(task.sub_status.lastIndexOf("(")+1, task.sub_status.lastIndexOf(")"))}
+                            {progressText && (
+                                <div style={{fontSize: '0.75rem', color: '#2563eb', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
+                                    数量: {progressText}
                                 </div>
                             )}
                         </div>
@@ -271,7 +273,19 @@
                                         <div>
                                             <div className="step-header"><h2>第一步：生成预览样本</h2></div>
                                             <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="输入唤醒词，例如：小熊" />
-                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
+                                            <button onClick={async () => {
+                                                setLoading(true);
+                                                try {
+                                                    const res = await fetch(`${API}/preview`, {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                                        body: JSON.stringify({ wakeword })
+                                                    });
+                                                    const data = await res.json();
+                                                    setPreviews(data.urls || []);
+                                                } catch (e) { alert("预览失败"); }
+                                                setLoading(false);
+                                            }} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
                                                     {previews.map((url, i) => <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>)}
@@ -315,7 +329,7 @@
                                             <div key={m.id} className="model-row">
                                                 <div className="model-info">
                                                     <h4>{m.wakeword}</h4>
-                                                    <p>ID: {m.id} | {m.params?.num_samples || 'N/A'} 样本 | {m.params?.steps || 'N/A'} 步</p>
+                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步</p>
                                                 </div>
                                                 <div style={{display: 'flex', gap: '0.5rem'}}>
                                                     <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981'}}>下载</button>
