@@ -29,25 +29,20 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
-        .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.75rem; width: auto; height: auto; display: inline-flex; align-items: center; justify-content: center; }
-        .btn-retry { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; font-size: 1.1rem; }
+        .btn-retry { width: 22px; height: 22px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; font-size: 1rem; }
         .btn-retry:hover { border-color: var(--primary); color: var(--primary); background: #eff6ff; transform: rotate(90deg); }
         .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
-        /* 模型列表样式 */
-        .model-list { display: flex; flex-direction: column; }
-        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
-        .model-row:last-child { border-bottom: none; }
-        .model-info h4 { margin: 0 0 0.2rem 0; color: #1e293b; }
-        .model-info p { margin: 0; font-size: 0.8rem; color: #64748b; }
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
-        .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.4rem 0; color: #64748b; }
+        .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.5rem 0; color: #64748b; }
         .pipeline-step.active { color: var(--primary); font-weight: bold; }
         .pipeline-step.done { color: var(--success); }
         .pipeline-step.fail { color: var(--error); }
-        .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 2px; width: 60px; overflow: hidden; }
+        .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 4px; width: 80px; overflow: hidden; }
         .progress-mini-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
         .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
         .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
+        .model-list { display: flex; flex-direction: column; }
+        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal-content { background: white; padding: 2rem; border-radius: 12px; max-width: 500px; width: 90%; text-align: center; }
         .score-display { width: 120px; height: 120px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; position: relative; }
@@ -90,12 +85,13 @@
 
             const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
 
+            // 严谨排序逻辑
             const sortedTasks = useMemo(() => {
+                const statusWeight = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
                 return [...tasks].sort((a, b) => {
-                    const order = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
-                    const sA = order[a.status] !== undefined ? order[a.status] : 99;
-                    const sB = order[b.status] !== undefined ? order[b.status] : 99;
-                    if (sA !== sB) return sA - sB;
+                    const wA = statusWeight[a.status] ?? 99;
+                    const wB = statusWeight[b.status] ?? 99;
+                    if (wA !== wB) return wA - wB;
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
             }, [tasks]);
@@ -144,8 +140,7 @@
 
             const handleRetry = async (taskId, step) => {
                 const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (res.ok) fetchTasks(token);
             };
@@ -228,13 +223,14 @@
                 return (
                     <div className={className}>
                         <div style={{flex: 1}}>
-                            <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
                                 <span>{statusIcon} {label}</span>
                                 {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
                             </div>
-                            {isCurrent && task.sub_status.includes("(") && (
-                                <div style={{fontSize: '0.7rem', color: var(--primary), marginLeft: '22px', marginTop: '2px'}}>
-                                    进度: {task.sub_status.split("(")[1].replace(")", "")}
+                            {/* 显示具体进度数值：解析类似 "(150/500)" 的字符串 */}
+                            {isCurrent && task.sub_status && task.sub_status.includes("(") && (
+                                <div style={{fontSize: '0.75rem', color: var(--primary), marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
+                                    数量: {task.sub_status.substring(task.sub_status.lastIndexOf("(")+1, task.sub_status.lastIndexOf(")"))}
                                 </div>
                             )}
                         </div>
@@ -243,6 +239,11 @@
                         )}
                     </div>
                 );
+            };
+
+            const getStatusLabel = (s) => {
+                const map = { 'Running': '运行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待' };
+                return map[s] || s;
             };
 
             if (!user) return <div style={{display:'flex',height:'100vh',alignItems:'center',justifyContent:'center'}}><h1>🐻 openwakeword 训练平台</h1></div>;
@@ -314,7 +315,7 @@
                                             <div key={m.id} className="model-row">
                                                 <div className="model-info">
                                                     <h4>{m.wakeword}</h4>
-                                                    <p>ID: {m.id} | {m.params.num_samples} 样本 | {m.params.steps} 步</p>
+                                                    <p>ID: {m.id} | {m.params?.num_samples || 'N/A'} 样本 | {m.params?.steps || 'N/A'} 步</p>
                                                 </div>
                                                 <div style={{display: 'flex', gap: '0.5rem'}}>
                                                     <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981'}}>下载</button>

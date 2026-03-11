@@ -138,37 +138,66 @@ def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, laye
     with open(os.path.join(task_dir, "config.yaml"), "w", encoding="utf-8") as f:
         yaml.dump(config_data, f, allow_unicode=True)
 
-def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress, sub_status_msg, cwd=None, env=None):
+def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress, sub_status_msg, cwd=None, env=None, track_dir=None, target_total=0):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
-    if t: t.sub_status, t.current_step, t.progress = f"{step_num}/{total_steps}: {sub_status_msg}", step_num, start_progress; db.commit()
+    if t: t.sub_status, t.current_step, t.progress = f"{sub_status_msg}", step_num, start_progress; db.commit()
     db.close()
+    
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
-    progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
-    for line in process.stdout:
-        match = progress_re.search(line)
-        if match:
-            current, total = int(match.group(1)), int(match.group(2))
-            percent = int(start_progress + (end_progress - start_progress) * (current / total))
+    
+    # 后台持续监控文件数量
+    while process.poll() is None:
+        current_count = 0
+        if track_dir and os.path.exists(track_dir):
+            current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
+        
+        if target_total > 0:
+            percent = int(start_progress + (end_progress - start_progress) * (min(current_count, target_total) / target_total))
             db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u: t_u.progress, t_u.sub_status = percent, f"{step_num}/{total_steps}: {sub_status_msg} ({current}/{total})"; db_u.commit()
+            if t_u:
+                t_u.progress = percent
+                t_u.sub_status = f"{sub_status_msg} ({current_count}/{target_total})"
+                db_u.commit()
             db_u.close()
+        
+        import time
+        time.sleep(1) # 每秒检查一次文件数
+
     process.wait()
     if process.returncode != 0: raise Exception(f"Failed at stage {step_num}")
 
 def run_v2_pipeline(task_id, resume_from_step=1):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
     if not t: return
+    
     backend_dir = os.path.dirname(os.path.abspath(__file__)); scripts_dir = os.path.join(backend_dir, "scripts")
     task_dir = os.path.join(backend_dir, "static/datasets", task_id); config_path = os.path.join(task_dir, "config.yaml")
     root_dir = os.path.dirname(os.path.dirname(backend_dir))
+    
+    # 路径解析
+    pos_train_dir = os.path.join(task_dir, "positive_train_tts")
+    neg_train_dir = os.path.join(task_dir, "negative_train_tts")
+    
+    # 读取配置
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    n_pos = config.get("n_samples", 500)
+    n_neg = config.get("n_samples", 500) # 通常负样本总数基于 n_samples 计算
+
     env = os.environ.copy(); env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
     total_steps = 5; t.status = "Running"; db.commit(); db.close()
+    
     try:
-        if resume_from_step <= 1: run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
-        if resume_from_step <= 2: run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
-        if resume_from_step <= 3: run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
-        if resume_from_step <= 4: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
-        if resume_from_step <= 5: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+        if resume_from_step <= 1: 
+            run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos)
+        if resume_from_step <= 2: 
+            run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg)
+        if resume_from_step <= 3: 
+            run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
+        if resume_from_step <= 4: 
+            run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
+        if resume_from_step <= 5: 
+            run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
         db_f = SessionLocal(); t_f = db_f.query(Task).filter(Task.id == task_id).first()
         if t_f: t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100; db_f.commit(); db_f.close()
     except Exception as e:
