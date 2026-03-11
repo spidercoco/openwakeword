@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>唤醒词工作室 - WakeWord Studio</title>
+    <title>openwakeword 训练平台</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -46,7 +46,6 @@
             const [loading, setLoading] = useState(false);
             const [uiStep, setUiStep] = useState(1);
 
-            // 智能适配 API 路径
             const getApiBase = () => {
                 const path = window.location.pathname;
                 if (path.startsWith('/site')) return '/site/api';
@@ -57,7 +56,11 @@
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : Promise.reject())
-                .then(data => setUser(data))
+                .then(data => {
+                    setUser(data);
+                    setToken(t);
+                    localStorage.setItem('token', t);
+                })
                 .catch(() => logout());
             }, [API]);
 
@@ -71,16 +74,22 @@
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
-                const t = params.get('token') || token;
-                if (t) {
-                    setToken(t);
-                    localStorage.setItem('token', t);
-                    // 清理 URL 中的 token
-                    if (params.has('token')) {
-                        window.history.replaceState({}, "", window.location.pathname);
-                    }
-                    fetchUser(t);
-                    fetchTasks(t);
+                const urlToken = params.get('token');
+                
+                // 1. 如果 URL 有 Token，优先使用
+                if (urlToken) {
+                    window.history.replaceState({}, "", window.location.pathname);
+                    fetchUser(urlToken);
+                    fetchTasks(urlToken);
+                } 
+                // 2. 如果本地有持久化 Token，使用之
+                else if (token) {
+                    fetchUser(token);
+                    fetchTasks(token);
+                }
+                // 3. 否则，默认尝试本地开发模式登录 (跳过登录)
+                else {
+                    fetchUser('local-dev-mode'); 
                 }
             }, []);
 
@@ -140,16 +149,15 @@
 
             if (!user) return (
                 <div style={{display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
-                    <h1>🐻 唤醒词工作室</h1>
-                    <p>在线训练您的自定义唤醒词模型。</p>
-                    <button onClick={() => window.location.href='/site/login/github'} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>通过 GitHub 登录</button>
+                    <h1>🐻 openwakeword 训练平台</h1>
+                    <p>正在进入系统...</p>
                 </div>
             );
 
             return (
                 <div>
                     <div className="navbar">
-                        <strong style={{fontSize: '1.2rem'}}>唤醒词工作室</strong>
+                        <strong style={{fontSize: '1.2rem'}}>openwakeword 训练平台</strong>
                         <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
                             <span>{user.username}</span>
                             <img src={user.avatar_url} style={{width: 32, height: 32, borderRadius: '50%'}} />
