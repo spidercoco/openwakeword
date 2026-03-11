@@ -41,7 +41,6 @@ class Task(Base):
     id = Column(String, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     wakeword = Column(String)
-    similar_words = Column(JSON)
     status = Column(String)
     sub_status = Column(String)
     current_step = Column(Integer, default=1)
@@ -289,7 +288,7 @@ async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_c
     task_dir = os.path.join(backend_dir, "static/datasets", task_id)
     os.makedirs(task_dir, exist_ok=True)
     generate_task_yaml(task_dir, req.wakeword, req.similar_words, req.num_samples, req.epochs)
-    new_task = Task(id=task_id, user_id=u.id, wakeword=req.wakeword, similar_words=req.similar_words,
+    new_task = Task(id=task_id, user_id=u.id, wakeword=req.wakeword,
                     status="Pending", sub_status="等待中", params=req.dict(), current_step=1)
     db.add(new_task)
     db.commit()
