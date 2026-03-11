@@ -33,7 +33,10 @@
         .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s; }
         .status-text { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
         .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
-        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
+        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+        .tag-remove { cursor: pointer; color: #94a3b8; font-weight: bold; }
+        .tag-remove:hover { color: #ef4444; }
+        .add-tag-box { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
         .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
         .model-card { border: 1px solid #e2e8f0; padding: 1.5rem; border-radius: 10px; transition: transform 0.2s; }
         .model-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
@@ -51,6 +54,7 @@
             const [wakeword, setWakeword] = useState("");
             const [previews, setPreviews] = useState([]);
             const [similarWords, setSimilarWords] = useState([]);
+            const [newWordInput, setNewWordInput] = useState("");
             const [tasks, setTasks] = useState([]);
             const [models, setModels] = useState([]);
             const [loading, setLoading] = useState(false);
@@ -123,7 +127,6 @@
 
             const handleGetSimilars = async () => {
                 setLoading(true);
-                // 注意：这里不再清空 previews，以保持 UI 稳定
                 try {
                     const res = await fetch(`${API}/generate-similar-words`, {
                         method: 'POST',
@@ -135,6 +138,17 @@
                     setUiStep(2);
                 } catch (e) { alert("生成近似词失败"); }
                 setLoading(false);
+            };
+
+            const handleAddWord = () => {
+                if (!newWordInput.trim()) return;
+                const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w);
+                setSimilarWords([...similarWords, ...words]);
+                setNewWordInput("");
+            };
+
+            const handleRemoveWord = (index) => {
+                setSimilarWords(similarWords.filter((_, i) => i !== index));
             };
 
             const handleTrain = async () => {
@@ -208,16 +222,38 @@
 
                                     {uiStep === 2 && (
                                         <div>
-                                            <div className="step-header"><h2>第二步：生成对抗样本 (近似词)</h2></div>
-                                            <p>大模型已为您生成发音相似的词汇，用于降低误触发：</p>
-                                            <div className="tag-list">
-                                                {similarWords.map((w, i) => <span key={i} className="tag">{w}</span>)}
+                                            <div className="step-header"><h2>第二步：管理对抗样本 (近似词)</h2></div>
+                                            <p>大模型已生成发音相似词汇。你可以删除或手动添加，用于降低误触发：</p>
+                                            
+                                            <div className="add-tag-box">
+                                                <input 
+                                                    value={newWordInput} 
+                                                    onChange={e => setNewWordInput(e.target.value)} 
+                                                    onKeyDown={e => e.key === 'Enter' && handleAddWord()}
+                                                    placeholder="输入词语，多个用逗号分隔" 
+                                                    style={{margin: 0}}
+                                                />
+                                                <button onClick={handleAddWord} className="btn-primary" style={{width: '100px'}}>添加</button>
                                             </div>
-                                            <button onClick={() => setUiStep(3)} className="btn-primary">确认词汇，继续下一步</button>
-                                            <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>
-                                                {loading ? "重新生成中..." : "重新生成"}
-                                            </button>
-                                            <button onClick={() => { setUiStep(1); setPreviews([]); }} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
+
+                                            <div className="tag-list">
+                                                {similarWords.map((w, i) => (
+                                                    <span key={i} className="tag">
+                                                        {w}
+                                                        <span className="tag-remove" onClick={() => handleRemoveWord(i)}>×</span>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            
+                                            <div style={{marginTop: '2rem'}}>
+                                                <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>
+                                                    确认这 {similarWords.length} 个词汇，继续下一步
+                                                </button>
+                                                <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>
+                                                    {loading ? "重新生成中..." : "让大模型再想一批"}
+                                                </button>
+                                                <button onClick={() => { setUiStep(1); setPreviews([]); }} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
+                                            </div>
                                         </div>
                                     )}
 
