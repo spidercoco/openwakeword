@@ -2,57 +2,78 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>openwakeword 训练平台</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; --error: #ef4444; }
-        body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
-        .navbar { background: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
-        .nav-tabs { display: flex; gap: 2rem; margin-left: 2rem; flex: 1; }
-        .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; -webkit-tap-highlight-color: transparent; }
+        
+        /* 导航栏响应式 */
+        .navbar { background: white; padding: 0.8rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 100; }
+        .nav-brand { font-size: 1.1rem; font-weight: bold; color: #1e293b; white-space: nowrap; }
+        .nav-tabs { display: flex; gap: 1rem; margin-left: 1rem; flex: 1; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-tabs::-webkit-scrollbar { display: none; }
+        .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; font-size: 0.9rem; }
         .nav-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 2rem; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; }
-        .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: #1e293b; }
+        .user-info { display: flex; align-items: center; gap: 0.5rem; }
+        .user-info span { display: none; } /* 手机端隐藏用户名 */
+
+        /* 布局响应式 */
+        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 1.5rem; max-width: 1300px; margin: 1.5rem auto; padding: 0 1rem; }
+        @media (max-width: 1024px) {
+            .layout { grid-template-columns: 1fr; }
+            .side-bar { order: 2; }
+            .main-content { order: 1; }
+        }
+
+        .card { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+        .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem; color: #1e293b; }
+        .step-header h2 { font-size: 1.2rem; margin: 0; }
+        
         .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
         .badge.Completed { background: #dcfce7; color: #166534; }
         .badge.Running { background: #dbeafe; color: #1e40af; }
         .badge.Failed { background: #fee2e2; color: #991b1b; }
-        input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
-        .param-group { margin-bottom: 1.5rem; }
-        input[type="range"] { height: 6px; -webkit-appearance: none; background: #e2e8f0; border-radius: 3px; outline: none; border: none; margin: 0.5rem 0; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--primary); border-radius: 50%; cursor: pointer; }
-        button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        input, select { width: 100%; padding: 0.8rem; margin: 0.5rem 0 1.2rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; outline: none; }
+        input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1); }
+
+        .param-group { margin-bottom: 1.2rem; }
+        input[type="range"] { width: 100%; height: 8px; -webkit-appearance: none; background: #e2e8f0; border-radius: 4px; outline: none; border: none; margin: 1rem 0; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; background: var(--primary); border-radius: 50%; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+
+        button { width: 100%; padding: 0.9rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 1rem; }
+        button:active { transform: scale(0.98); }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
         
-        /* 极简圆形按钮样式 */
-        .icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; }
-        .icon-btn:hover { border-color: var(--primary); color: var(--primary); background: #f0f7ff; }
-        .icon-btn svg { width: 16px; height: 16px; }
-        .icon-btn.success:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+        .icon-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; flex-shrink: 0; }
+        .icon-btn svg { width: 18px; height: 18px; }
 
-        .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
+        /* 进度与看板 */
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
-        .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.5rem 0; color: #64748b; }
-        .pipeline-step.active { color: var(--primary); font-weight: bold; }
-        .pipeline-step.done { color: var(--success); }
-        .pipeline-step.fail { color: var(--error); }
-        .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 4px; width: 80px; overflow: hidden; }
-        .progress-mini-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
-        .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
-        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
-        .model-list { display: flex; flex-direction: column; }
-        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1.2rem 0; border-bottom: 1px solid #f1f5f9; }
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-        .modal-content { background: white; padding: 2rem; border-radius: 12px; max-width: 500px; width: 90%; text-align: center; }
-        .score-display { width: 120px; height: 120px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; position: relative; }
-        .score-display.detected { border-color: var(--success); background: #ecfdf5; animation: pulse 0.5s; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.6rem 0; border-bottom: 1px solid #f1f5f9; }
+        .pipeline-step:last-child { border-bottom: none; }
+        .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 4px; width: 60px; overflow: hidden; }
+        .progress-mini-fill { height: 100%; background: var(--primary); }
+
+        /* 模型列表适配 */
+        .model-row { padding: 1.2rem 0; border-bottom: 1px solid #f1f5f9; }
+        .model-info h4 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+        
+        /* 弹窗适配 */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+        .modal-content { background: white; padding: 1.5rem; border-radius: 16px; width: 100%; max-width: 400px; text-align: center; }
+        .score-display { width: 140px; height: 140px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; }
+        
+        @media (min-width: 768px) {
+            .user-info span { display: block; font-size: 0.9rem; color: #475569; }
+            .nav-brand { font-size: 1.2rem; }
+            .card { padding: 2rem; }
+        }
     </style>
 </head>
 <body>
@@ -62,28 +83,19 @@
 
         const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
 
-        // 简约图标组件
         const IconDownload = () => (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
             </svg>
         );
-
         const IconMic = () => (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
             </svg>
         );
-
         const IconRetry = () => (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 19 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                <polyline points="23 4 23 10 19 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
             </svg>
         );
 
@@ -106,14 +118,10 @@
                             <span>{statusIcon} {label}</span>
                             {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
                         </div>
-                        {progressText && (
-                            <div style={{fontSize: '0.75rem', color: '#2563eb', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
-                                数量: {progressText}
-                            </div>
-                        )}
+                        {progressText && <div style={{fontSize: '0.75rem', color: 'var(--primary)', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>数量: {progressText}</div>}
                     </div>
-                    {(task.status !== 'Running') && (
-                        <div className="icon-btn" title="从该步重试" onClick={() => onRetry(task.id, stepNum)} style={{width:24, height:24}}>
+                    {task.status !== 'Running' && (
+                        <div className="icon-btn" title="重试" onClick={() => onRetry(task.id, stepNum)} style={{width:28, height:28}}>
                             <IconRetry />
                         </div>
                     )}
@@ -139,7 +147,6 @@
             const [currentScore, setCurrentScore] = useState(0);
             const [hitCount, setHitCount] = useState(0);
             const [isDetected, setIsDetected] = useState(false);
-            
             const wsRef = useRef(null);
             const audioCtxRef = useRef(null);
             const processorRef = useRef(null);
@@ -151,62 +158,29 @@
 
             const sortedTasks = useMemo(() => {
                 const order = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
-                return [...tasks].sort((a, b) => {
-                    const wA = order[a.status] ?? 99;
-                    const wB = order[b.status] ?? 99;
-                    if (wA !== wB) return wA - wB;
-                    return new Date(b.created_at) - new Date(a.created_at);
-                });
+                return [...tasks].sort((a, b) => (order[a.status] ?? 99) - (order[b.status] ?? 99) || new Date(b.created_at) - new Date(a.created_at));
             }, [tasks]);
 
-            const logout = useCallback(() => { setUser(null); setToken(null); localStorage.removeItem('token'); }, []);
-
+            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
-                .then(r => r.ok ? r.json() : Promise.reject())
-                .then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
+                .then(r => r.ok ? r.json() : Promise.reject()).then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
                 .catch(() => logout());
-            }, [logout]);
-
-            const fetchTasks = useCallback((t) => {
-                if (!t) return;
-                fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }})
-                .then(r => r.ok ? r.json() : [])
-                .then(setTasks);
             }, []);
+            const fetchTasks = useCallback((t) => { t && fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }}).then(r => r.json()).then(setTasks).catch(()=>{}); }, []);
+            const fetchModels = useCallback((t) => { t && fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }}).then(r => r.json()).then(setModels).catch(()=>{}); }, []);
 
-            const fetchModels = useCallback((t) => {
-                if (!t) return;
-                fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }})
-                .then(r => r.ok ? r.json() : [])
-                .then(setModels);
+            useEffect(() => {
+                const urlToken = new URLSearchParams(window.location.search).get('token') || token;
+                if (urlToken) { fetchUser(urlToken); fetchTasks(urlToken); } else fetchUser('local-dev-mode');
             }, []);
 
             useEffect(() => {
-                const params = new URLSearchParams(window.location.search);
-                const urlToken = params.get('token') || token;
-                if (urlToken) {
-                    if (params.get('token')) window.history.replaceState({}, "", window.location.pathname);
-                    fetchUser(urlToken); fetchTasks(urlToken);
-                } else { fetchUser('local-dev-mode'); }
-            }, [fetchUser, fetchTasks, token]);
-
-            useEffect(() => {
-                const timer = setInterval(() => {
-                    if (token) {
-                        fetchTasks(token);
-                        if (activeTab === "models") fetchModels(token);
-                    }
-                }, 3000);
+                const timer = setInterval(() => { if (token) { fetchTasks(token); if (activeTab === "models") fetchModels(token); } }, 3000);
                 return () => clearInterval(timer);
-            }, [token, activeTab, fetchTasks, fetchModels]);
+            }, [token, activeTab]);
 
-            const handleRetry = useCallback(async (taskId, step) => {
-                const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
-                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (res.ok) fetchTasks(token);
-            }, [token, fetchTasks]);
+            const handleRetry = async (id, s) => { const res = await fetch(`${API}/retry/${id}?step=${s}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }}); if (res.ok) fetchTasks(token); };
 
             const startLiveTest = async (model) => {
                 setTestingModel(model); setTestModalOpen(true); setHitCount(0); setCurrentScore(0);
@@ -214,11 +188,8 @@
                 const wsUrl = `${protocol}//${window.location.host}${API}/ws/test-model/${model.id}`;
                 wsRef.current = new WebSocket(wsUrl);
                 wsRef.current.onmessage = (e) => {
-                    const data = JSON.parse(e.data);
-                    if (data.score !== undefined) {
-                        setCurrentScore(data.score);
-                        if (data.score > 0.5) { setHitCount(v => v + 1); setIsDetected(true); setTimeout(() => setIsDetected(false), 600); }
-                    }
+                    const d = JSON.parse(e.data);
+                    if (d.score !== undefined) { setCurrentScore(d.score); if (d.score > 0.5) { setHitCount(v => v + 1); setIsDetected(true); setTimeout(() => setIsDetected(false), 600); } }
                 };
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true }});
@@ -227,31 +198,22 @@
                     processorRef.current = audioCtxRef.current.createScriptProcessor(4096, 1, 1);
                     processorRef.current.onaudioprocess = (e) => {
                         if (wsRef.current?.readyState === WebSocket.OPEN) {
-                            const pcmData = new Int16Array(e.inputBuffer.getChannelData(0).length);
-                            for (let i = 0; i < pcmData.length; i++) pcmData[i] = Math.max(-1, Math.min(1, e.inputBuffer.getChannelData(0)[i])) * 0x7FFF;
-                            wsRef.current.send(pcmData.buffer);
+                            const pcm = new Int16Array(e.inputBuffer.getChannelData(0).length);
+                            for (let i = 0; i < pcm.length; i++) pcm[i] = Math.max(-1, Math.min(1, e.inputBuffer.getChannelData(0)[i])) * 0x7FFF;
+                            wsRef.current.send(pcm.buffer);
                         }
                     };
-                    source.connect(processorRef.current);
-                    processorRef.current.connect(audioCtxRef.current.destination);
-                } catch (err) { alert("麦克风失败"); stopLiveTest(); }
+                    source.connect(processorRef.current); processorRef.current.connect(audioCtxRef.current.destination);
+                } catch (err) { alert("麦克风启动失败，请检查权限或HTTPS环境"); stopLiveTest(); }
             };
 
-            const stopLiveTest = () => {
-                wsRef.current?.close(); processorRef.current?.disconnect(); audioCtxRef.current?.close();
-                setTestModalOpen(false); setTestingModel(null);
-            };
+            const stopLiveTest = () => { wsRef.current?.close(); processorRef.current?.disconnect(); audioCtxRef.current?.close(); setTestModalOpen(false); setTestingModel(null); };
 
             const handlePreview = async () => {
                 setLoading(true);
                 try {
-                    const res = await fetch(`${API}/preview`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword })
-                    });
-                    const data = await res.json();
-                    setPreviews(data.urls || []);
+                    const res = await fetch(`${API}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ wakeword }) });
+                    const data = await res.json(); setPreviews(data.urls || []);
                 } catch (e) { alert("预览失败"); }
                 setLoading(false);
             };
@@ -259,13 +221,8 @@
             const handleGetSimilars = async () => {
                 setLoading(true);
                 try {
-                    const res = await fetch(`${API}/generate-similar-words`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword })
-                    });
-                    const data = await res.json();
-                    setSimilarWords(data.similar_words || []); setUiStep(2);
+                    const res = await fetch(`${API}/generate-similar-words`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ wakeword }) });
+                    const data = await res.json(); setSimilarWords(data.similar_words || []); setUiStep(2);
                 } catch (e) { alert("生成失败"); }
                 setLoading(false);
             };
@@ -273,23 +230,10 @@
             const handleTrain = async () => {
                 setLoading(true);
                 try {
-                    const res = await fetch(`${API}/train`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ 
-                            wakeword, similar_words: similarWords, 
-                            num_samples: parseInt(numSamples), steps: parseInt(trainSteps),
-                            layer_size: parseInt(layerSize), aug_rounds: parseInt(augRounds)
-                        })
-                    });
+                    const res = await fetch(`${API}/train`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ wakeword, similar_words: similarWords, num_samples: parseInt(numSamples), steps: parseInt(trainSteps), layer_size: parseInt(layerSize), aug_rounds: parseInt(augRounds) }) });
                     if (res.ok) { setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]); fetchTasks(token); }
                 } catch (e) { alert("提交失败"); }
                 setLoading(false);
-            };
-
-            const getStatusLabel = (s) => {
-                const map = { 'Running': '运行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待' };
-                return map[s] || s;
             };
 
             if (!user) return <div style={{display:'flex',height:'100vh',alignItems:'center',justifyContent:'center'}}><h1>🐻 openwakeword 训练平台</h1></div>;
@@ -297,15 +241,14 @@
             return (
                 <div>
                     <div className="navbar">
-                        <strong style={{fontSize: '1.2rem', color: '#1e293b'}}>openwakeword 训练平台</strong>
+                        <div className="nav-brand">🐻 openwakeword</div>
                         <div className="nav-tabs">
                             <div className={`nav-tab ${activeTab === "train" ? "active" : ""}`} onClick={() => setActiveTab("train")}>训练任务</div>
                             <div className={`nav-tab ${activeTab === "models" ? "active" : ""}`} onClick={() => { setActiveTab("models"); fetchModels(token); }}>模型库</div>
                         </div>
-                        <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
+                        <div className="user-info">
                             <span>{user.username}</span>
-                            <img src={user.avatar_url} style={{width:32,height:32,borderRadius:'50%'}} />
-                            <button onClick={logout} className="btn-outline" style={{width:'auto',padding:'0.4rem 0.8rem'}}>退出</button>
+                            <img src={user.avatar_url} style={{width:28,height:28,borderRadius:'50%'}} onClick={logout} />
                         </div>
                     </div>
 
@@ -315,40 +258,35 @@
                                 <div className="card">
                                     {uiStep === 1 && (
                                         <div>
-                                            <div className="step-header"><h2>第一步：生成预览样本</h2></div>
+                                            <div className="step-header"><h2>1. 生成预览样本</h2></div>
                                             <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="输入唤醒词，例如：小熊" />
-                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
+                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "Qwen3-TTS 合成中..." : "生成预览样本"}</button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
                                                     {previews.map((url, i) => <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>)}
-                                                    <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>{loading ? "深度思考中..." : "效果不错，下一步"}</button>
+                                                    <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>{loading ? "Qwen3.5-Plus 思考中..." : "效果不错，下一步"}</button>
                                                 </div>
                                             )}
                                         </div>
                                     )}
                                     {uiStep === 2 && (
                                         <div>
-                                            <div className="step-header"><h2>第二步：管理对抗样本</h2></div>
+                                            <div className="step-header"><h2>2. 管理对抗样本</h2></div>
                                             <input value={newWordInput} onChange={e => setNewWordInput(e.target.value)} placeholder="手动添加近似词，逗号分隔" />
-                                            <button onClick={() => {
-                                                const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w);
-                                                setSimilarWords([...similarWords, ...words]); setNewWordInput("");
-                                            }} className="btn-primary" style={{marginBottom:'1rem'}}>添加</button>
-                                            <div className="tag-list">
-                                                {similarWords.map((w, i) => <span key={i} className="tag">{w}<span style={{cursor:'pointer', opacity:0.5}} onClick={() => setSimilarWords(similarWords.filter((_, idx) => idx !== i))}> ×</span></span>)}
-                                            </div>
-                                            <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>确认词汇，下一步</button>
+                                            <button onClick={() => { const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w); setSimilarWords([...similarWords, ...words]); setNewWordInput(""); }} className="btn-primary" style={{marginBottom:'1rem'}}>添加</button>
+                                            <div className="tag-list">{similarWords.map((w, i) => <span key={i} className="tag">{w}<span style={{cursor:'pointer', opacity:0.5}} onClick={() => setSimilarWords(similarWords.filter((_, idx) => idx !== i))}> ×</span></span>)}</div>
+                                            <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0} style={{marginTop:'1rem'}}>确认词汇，下一步</button>
                                             <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>换一批</button>
                                         </div>
                                     )}
                                     {uiStep === 3 && (
                                         <div>
-                                            <div className="step-header"><h2>第三步：训练配置</h2></div>
-                                            <div className="param-group"><span>样本数: {numSamples.toLocaleString()}</span><input type="range" min="100" max="200000" step="100" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} /></div>
-                                            <div className="param-group"><span>步数: {trainSteps.toLocaleString()}</span><input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(parseInt(e.target.value))} /></div>
-                                            <div className="param-group"><span>层大小</span><select value={layerSize} onChange={e => setLayerSize(e.target.value)}><option value="32">32</option><option value="64">64</option><option value="128">128</option></select></div>
-                                            <div className="param-group"><span>增强轮数: {augRounds}</span><input type="range" min="1" max="5" step="1" value={augRounds} onChange={e => setAugRounds(parseInt(e.target.value))} /></div>
-                                            <button onClick={handleTrain} className="btn-primary" disabled={loading}>开始训练</button>
+                                            <div className="step-header"><h2>3. 训练配置</h2></div>
+                                            <div className="param-group"><div style={{display:'flex',justifyContent:'space-between',fontSize:'0.9rem'}}><span>样本数</span><strong>{numSamples.toLocaleString()}</strong></div><input type="range" min="100" max="200000" step="100" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} /></div>
+                                            <div className="param-group"><div style={{display:'flex',justifyContent:'space-between',fontSize:'0.9rem'}}><span>迭代步数</span><strong>{trainSteps.toLocaleString()}</strong></div><input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(parseInt(e.target.value))} /></div>
+                                            <div className="param-group"><span>模型层大小</span><select value={layerSize} onChange={e => setLayerSize(e.target.value)}><option value="32">32 (轻量)</option><option value="64">64 (标准)</option><option value="128">128 (高性能)</option></select></div>
+                                            <div className="param-group"><div style={{display:'flex',justifyContent:'space-between',fontSize:'0.9rem'}}><span>增强轮数</span><strong>{augRounds}</strong></div><input type="range" min="1" max="5" step="1" value={augRounds} onChange={e => setAugRounds(parseInt(e.target.value))} /></div>
+                                            <button onClick={handleTrain} className="btn-primary" disabled={loading}>提交流水线</button>
                                         </div>
                                     )}
                                 </div>
@@ -361,15 +299,11 @@
                                             <div key={m.id} className="model-row">
                                                 <div className="model-info">
                                                     <h4>{m.wakeword}</h4>
-                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步</p>
+                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本</p>
                                                 </div>
                                                 <div style={{display: 'flex', gap: '0.8rem'}}>
-                                                    <div className="icon-btn success" onClick={() => window.open(m.download_url)} title="下载模型">
-                                                        <IconDownload />
-                                                    </div>
-                                                    <div className="icon-btn" onClick={() => startLiveTest(m)} title="实时测试">
-                                                        <IconMic />
-                                                    </div>
+                                                    <div className="icon-btn success" onClick={() => window.open(m.download_url)} title="下载"><IconDownload /></div>
+                                                    <div className="icon-btn" onClick={() => startLiveTest(m)} title="测试"><IconMic /></div>
                                                 </div>
                                             </div>
                                         ))}
@@ -379,11 +313,14 @@
                         </div>
 
                         <div className="side-bar">
-                            <div className="card" style={{padding: '1.5rem'}}>
+                            <div className="card" style={{padding: '1.2rem'}}>
                                 <h3>任务看板</h3>
                                 {sortedTasks.map(t => (
                                     <div key={t.id} className="task-item">
-                                        <div style={{display: 'flex', justifyContent: 'space-between'}}><strong>{t.wakeword}</strong><span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span></div>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems:'center'}}>
+                                            <strong>{t.wakeword}</strong>
+                                            <span className={`badge ${t.status}`}>{t.status === "Completed" ? "已完成" : t.status === "Running" ? "运行中" : t.status === "Failed" ? "失败" : "等待"}</span>
+                                        </div>
                                         <div className="pipeline-steps">
                                             <StepItem task={t} stepNum={1} label="生成正样本" onRetry={handleRetry} />
                                             <StepItem task={t} stepNum={2} label="生成近似词样本" onRetry={handleRetry} />
@@ -405,10 +342,10 @@
                                 <p><span className="mic-indicator"></span> 麦克风已开启</p>
                                 <div style={{fontSize:'1.2rem', fontWeight:'bold', color:'var(--success)'}}>命中次数: {hitCount}</div>
                                 <div className={`score-display ${isDetected ? 'detected' : ''}`}>
-                                    <span style={{fontSize:'2rem', fontWeight:800}}>{(currentScore * 100).toFixed(0)}%</span>
+                                    <span style={{fontSize:'2.2rem', fontWeight:800}}>{(currentScore * 100).toFixed(0)}%</span>
                                     <span style={{fontSize:'0.8rem', color:'#64748b'}}>置信度</span>
                                 </div>
-                                <button onClick={stopLiveTest} className="btn-primary" style={{background: '#ef4444'}}>停止测试</button>
+                                <button onClick={stopLiveTest} className="btn-primary" style={{background: '#ef4444'}}>关闭测试</button>
                             </div>
                         </div>
                     )}
