@@ -23,8 +23,7 @@ ALGORITHM = "HS256"
 BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 
-# 明确定义 Conda 环境名称
-TRAIN_CONDA_ENV = "oww_train"
+# 训练环境配置
 
 # --- 数据库模型 ---
 Base = declarative_base()
@@ -110,7 +109,6 @@ def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, st
         db.commit()
     db.close()
 
-    # 明确打印出执行的完整命令，方便确认 conda 环境
     print(f"[{task_id}] Executing Step {step_num}: {' '.join(cmd)}")
     
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
@@ -118,7 +116,6 @@ def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, st
     progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
     for line in process.stdout:
         stripped_line = line.strip()
-        # 将子进程的所有输出实时打印到后端控制台
         print(f"[{task_id}][S{step_num}] {stripped_line}")
         
         match = progress_re.search(stripped_line)
@@ -147,7 +144,25 @@ def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], n
         "n_samples_val": int(num_samples * 0.2),
         "steps": epochs * 20, 
         "epochs": epochs,
-        "model_name": "custom_model",
+        "model_name": "beary_custom",
+        "model_type": "dnn",
+        "layer_size": 32,
+        "max_negative_weight": 1500,
+        "target_false_positives_per_hour": 0.2,
+        "false_positive_validation_data_path": "validation_set_features.npy",
+        "feature_data_files": {
+            "ACAV100M_sample": "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+        },
+        "batch_n_per_class": {
+            "ACAV100M_sample": 128,
+            "adversarial_negative": 50,
+            "positive": 50
+        },
+        "rir_paths": ["./mit_rirs"],
+        "background_paths_duplication_rate": [1],
+        "background_paths": ["./audioset_16k", "./fma"],
+        "augmentation_rounds": 1,
+        "augmentation_batch_size": 16,
         "output_dir": "./" 
     }
     with open(os.path.join(task_dir, "config.yaml"), "w") as f:
@@ -168,9 +183,12 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
     task_dir = os.path.join(backend_dir, "static/datasets", task_id)
     config_path = os.path.join(task_dir, "config.yaml")
     
-    env = os.environ.copy()
+    # 计算项目根目录，以便加入 PYTHONPATH
     root_dir = os.path.dirname(os.path.dirname(backend_dir))
-    env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root_dir + (":" + existing_pythonpath if existing_pythonpath else "")
 
     total_steps = 5
     t.status = "Running"
@@ -181,27 +199,24 @@ def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
         # Step 1: 正式正样本生成
         if resume_from_step <= 1:
             run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
-        
+
         # Step 2: 近似词样本生成
         if resume_from_step <= 2:
             run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
-        
+
         # Step 3: 统一重采样
         if resume_from_step <= 3:
             run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
-        
+
         # Step 4: 样本增强/特征提取
         if resume_from_step <= 4:
             run_cmd_v2(["python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
-        
-        # Step 5: 模型训练 (强制使用 oww_train 环境)
-        if resume_from_step <= 5:
-            # 显式使用全局变量 TRAIN_CONDA_ENV
-            train_cmd = ["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path]
-            run_cmd_v2(train_cmd, task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
 
-        db_f = SessionLocal()
-        t_f = db_f.query(Task).filter(Task.id == task_id).first()
+        # Step 5: 模型训练
+        if resume_from_step <= 5:
+            run_cmd_v2(["python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+
+        db_f = SessionLocal()        t_f = db_f.query(Task).filter(Task.id == task_id).first()
         if t_f:
             t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
             db_f.commit()
@@ -233,9 +248,11 @@ async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
     os.makedirs(out_dir, exist_ok=True)
     scripts_dir = os.path.join(backend_dir, "scripts")
     cmd = ["python", "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
+    
+    root_dir = os.path.dirname(os.path.dirname(backend_dir))
     env = os.environ.copy()
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
@@ -269,8 +286,10 @@ async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_c
 @app.post("/api/retry/{task_id}")
 async def retry_task(task_id: str, bt: BackgroundTasks, step: int = None, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
+    if not task: raise HTTPException(status_code=404, detail="Task not found")
     start_from = step if step is not None else task.current_step
     task.status = "Pending"
+    task.sub_status = f"准备从第 {start_from} 步重试..."
     db.commit()
     bt.add_task(run_v2_pipeline, task_id, start_from)
     return {"message": "Retry started"}
