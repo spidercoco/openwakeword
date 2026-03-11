@@ -10,9 +10,10 @@ import yaml
 import re
 import sys
 import subprocess
+import asyncio
 from datetime import datetime
 from typing import List, Optional
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,18 +24,24 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import jwt
 
+# 尝试导入推理库，如果后端环境没有，则在启动时提醒
+try:
+    import onnxruntime as ort
+    import openwakeword
+    from openwakeword.utils import AudioFeatures
+    HAS_INFERENCE_LIBS = True
+except ImportError:
+    HAS_INFERENCE_LIBS = False
+
 # --- 配置 ---
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
 ALGORITHM = "HS256"
 BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
-
-# 训练环境配置
 TRAIN_CONDA_ENV = "oww_train"
 
 # --- 数据库模型 ---
 Base = declarative_base()
-
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -58,7 +65,6 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 
-# --- 依赖与鉴权 ---
 def get_db():
     db = SessionLocal()
     try: yield db
@@ -85,13 +91,6 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
             db.refresh(user)
     return user
 
-# --- Pydantic 模型 ---
-class PreviewRequest(BaseModel):
-    wakeword: str
-
-class SimilarWordsRequest(BaseModel):
-    wakeword: str
-
 class TrainRequest(BaseModel):
     wakeword: str
     similar_words: List[str]
@@ -99,6 +98,12 @@ class TrainRequest(BaseModel):
     steps: int
     layer_size: int
     aug_rounds: int
+
+class PreviewRequest(BaseModel):
+    wakeword: str
+
+class SimilarWordsRequest(BaseModel):
+    wakeword: str
 
 app = FastAPI(root_path=BASE_PREFIX)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -108,131 +113,118 @@ os.makedirs("static/previews", exist_ok=True)
 os.makedirs("static/datasets", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- 业务逻辑：参数计算与 YAML 生成 ---
+# --- 业务逻辑 ---
 def get_dynamic_config(n_samples, steps, layer_size, aug_rounds):
     val_samples = max(20, int(n_samples * 0.2))
     pos_batch = 50 if n_samples > 100 else 16
     neg_weight = 1500 if layer_size >= 64 else 800
     acc = 0.6 if steps >= 1000 else 0.5
-
-    dynamic_params = {
-        "n_samples": n_samples,
-        "n_samples_val": val_samples,
-        "steps": steps,
-        "layer_size": layer_size,
-        "augmentation_rounds": aug_rounds,
-        "batch_n_per_class": {
-            "positive": pos_batch,
-            "adversarial_negative": 50,
-            "ACAV100M_sample": 128
-        },
-        "max_negative_weight": neg_weight,
-        "target_accuracy": acc
+    return {
+        "n_samples": n_samples, "n_samples_val": val_samples, "steps": steps,
+        "layer_size": layer_size, "augmentation_rounds": aug_rounds,
+        "batch_n_per_class": {"positive": pos_batch, "adversarial_negative": 50, "ACAV100M_sample": 128},
+        "max_negative_weight": neg_weight, "target_accuracy": acc
     }
-    return dynamic_params
 
-def generate_task_yaml(task_dir: str, wakeword: str, similar_words: List[str], n_samples: int, steps: int, layer_size: int, aug_rounds: int):
-    # 计算动态参数
+def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, layer_size, aug_rounds):
     dynamic = get_dynamic_config(n_samples, steps, layer_size, aug_rounds)
-    
     config_data = {
-        "target_phrase": wakeword,
-        "similar_phrases": similar_words,
-        "model_name": "beary_custom",
-        "model_type": "dnn",
-        "epochs": 50, # 保持内部逻辑兼容，实际训练受 steps 驱动
-        "target_false_positives_per_hour": 0.2,
-        "false_positive_validation_data_path": "validation_set_features.npy",
-        "feature_data_files": {
-            "ACAV100M_sample": "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
-        }
+        "target_phrase": wakeword, "similar_phrases": similar_words,
+        "model_name": "beary_custom", "model_type": "dnn", "epochs": 50,
+        "target_false_positives_per_hour": 0.2, "false_positive_validation_data_path": "validation_set_features.npy",
+        "feature_data_files": {"ACAV100M_sample": "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"}
     }
-    # 合并动态计算的参数
     config_data.update(dynamic)
-
     with open(os.path.join(task_dir, "config.yaml"), "w", encoding="utf-8") as f:
         yaml.dump(config_data, f, allow_unicode=True)
 
-# --- 执行工具 ---
-def run_cmd_v2(cmd: List[str], task_id: str, step_num: int, total_steps: int, start_progress: int, end_progress: int, sub_status_msg: str, cwd: str = None, env: dict = None):
-    db = SessionLocal()
-    t = db.query(Task).filter(Task.id == task_id).first()
-    if t:
-        t.sub_status = f"{step_num}/{total_steps}: {sub_status_msg}"
-        t.current_step = step_num
-        t.progress = start_progress
-        db.commit()
+def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress, sub_status_msg, cwd=None, env=None):
+    db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
+    if t: t.sub_status, t.current_step, t.progress = f"{step_num}/{total_steps}: {sub_status_msg}", step_num, start_progress; db.commit()
     db.close()
-
-    print(f"[{task_id}] Executing Step {step_num}: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
-
     progress_re = re.compile(r"PROGRESS:(\d+)/(\d+)")
     for line in process.stdout:
-        stripped_line = line.strip()
-        print(f"[{task_id}][S{step_num}] {stripped_line}")
-        match = progress_re.search(stripped_line)
+        match = progress_re.search(line)
         if match:
             current, total = int(match.group(1)), int(match.group(2))
             percent = int(start_progress + (end_progress - start_progress) * (current / total))
-            db_u = SessionLocal()
-            t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u:
-                t_u.progress, t_u.sub_status = percent, f"{step_num}/{total_steps}: {sub_status_msg} ({current}/{total})"
-                db_u.commit()
+            db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
+            if t_u: t_u.progress, t_u.sub_status = percent, f"{step_num}/{total_steps}: {sub_status_msg} ({current}/{total})"; db_u.commit()
             db_u.close()
-
     process.wait()
-    if process.returncode != 0:
-        raise Exception(f"Failed at stage {step_num}/{total_steps}")
+    if process.returncode != 0: raise Exception(f"Failed at stage {step_num}")
 
-# --- 流水线 ---
-def run_v2_pipeline(task_id: str, resume_from_step: int = 1):
-    db = SessionLocal()
-    t = db.query(Task).filter(Task.id == task_id).first()
+def run_v2_pipeline(task_id, resume_from_step=1):
+    db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
     if not t: return
-    
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    scripts_dir = os.path.join(backend_dir, "scripts")
-    task_dir = os.path.join(backend_dir, "static/datasets", task_id)
-    config_path = os.path.join(task_dir, "config.yaml")
+    backend_dir = os.path.dirname(os.path.abspath(__file__)); scripts_dir = os.path.join(backend_dir, "scripts")
+    task_dir = os.path.join(backend_dir, "static/datasets", task_id); config_path = os.path.join(task_dir, "config.yaml")
     root_dir = os.path.dirname(os.path.dirname(backend_dir))
-    
-    env = os.environ.copy()
-    env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    env = os.environ.copy(); env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    total_steps = 5; t.status = "Running"; db.commit(); db.close()
+    try:
+        if resume_from_step <= 1: run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
+        if resume_from_step <= 2: run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
+        if resume_from_step <= 3: run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
+        if resume_from_step <= 4: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
+        if resume_from_step <= 5: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
+        db_f = SessionLocal(); t_f = db_f.query(Task).filter(Task.id == task_id).first()
+        if t_f: t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100; db_f.commit(); db_f.close()
+    except Exception as e:
+        db_e = SessionLocal(); t_e = db_e.query(Task).filter(Task.id == task_id).first()
+        if t_e: t_e.status, t_e.sub_status = "Failed", str(e); db_e.commit(); db_e.close()
 
-    total_steps = 5
-    t.status = "Running"
-    db.commit()
-    db.close()
+# --- 实时测试 WebSocket ---
+@app.websocket("/api/ws/test-model/{task_id}")
+async def websocket_test_model(websocket: WebSocket, task_id: str):
+    await websocket.accept()
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(backend_dir, f"static/datasets/{task_id}/beary_custom.onnx")
+    
+    if not os.path.exists(model_path) or not HAS_INFERENCE_LIBS:
+        await websocket.send_json({"error": "模型不存在或后端环境缺少推理库"})
+        await websocket.close()
+        return
 
     try:
-        if resume_from_step <= 1:
-            run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, 0, 30, "生成正样本", scripts_dir, env)
-        if resume_from_step <= 2:
-            run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, 30, 60, "生成近似词样本", scripts_dir, env)
-        if resume_from_step <= 3:
-            run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, 60, 70, "重采样音频", scripts_dir, env)
-        if resume_from_step <= 4:
-            run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, 70, 90, "样本增强与特征提取", scripts_dir, env)
-        if resume_from_step <= 5:
-            run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, 90, 100, "训练模型", scripts_dir, env)
-
-        db_f = SessionLocal()
-        t_f = db_f.query(Task).filter(Task.id == task_id).first()
-        if t_f:
-            t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100
-            db_f.commit()
-        db_f.close()
+        # 初始化推理引擎
+        session = ort.InferenceSession(model_path)
+        input_name = session.get_inputs()[0].name
+        model_window_size = session.get_inputs()[0].shape[1]
+        F = AudioFeatures()
+        
+        audio_buffer = np.array([], dtype=np.int16)
+        
+        while True:
+            # 接收二进制音频块 (期望是 16kHz, 16bit PCM)
+            data = await websocket.receive_bytes()
+            chunk = np.frombuffer(data, dtype=np.int16)
+            audio_buffer = np.append(audio_buffer, chunk)
+            
+            # 当 buffer 足够长时（至少 1280 样本，约 80ms），进行一次特征提取
+            if len(audio_buffer) >= 1280:
+                audio_batch = audio_buffer.reshape(1, -1)
+                features = F.embed_clips(audio_batch)
+                n_embeddings = features.shape[1]
+                
+                if n_embeddings >= model_window_size:
+                    # 取最后一窗进行推理
+                    window = features[:, -model_window_size:, :]
+                    outputs = session.run(None, {input_name: window})
+                    score = float(outputs[0][0][0])
+                    await websocket.send_json({"score": score})
+                    # 保持 buffer 长度在合理范围（约 3 秒）
+                    audio_buffer = audio_buffer[-48000:]
+                
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for task {task_id}")
     except Exception as e:
-        db_e = SessionLocal()
-        t_e = db_e.query(Task).filter(Task.id == task_id).first()
-        if t_e:
-            t_e.status, t_e.sub_status = "Failed", str(e)
-            db_e.commit()
-        db_e.close()
+        print(f"WebSocket error: {e}")
+        try: await websocket.send_json({"error": str(e)})
+        except: pass
 
-# --- 路由 ---
+# --- 常用路由 ---
 @app.get("/")
 async def read_root(): return RedirectResponse(url="/site/static/frontend/index.html")
 
@@ -245,15 +237,10 @@ async def get_my_tasks(u=Depends(get_current_user), db: Session = Depends(get_db
 
 @app.post("/api/preview")
 async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
-    p_id = str(uuid.uuid4())[:8]
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    out_dir = os.path.join(backend_dir, "static/previews", p_id)
-    os.makedirs(out_dir, exist_ok=True)
-    scripts_dir = os.path.join(backend_dir, "scripts")
-    cmd = [sys.executable, "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
-    env = os.environ.copy()
-    root_dir = os.path.dirname(os.path.dirname(backend_dir))
-    env["PYTHONPATH"] = root_dir + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    p_id = str(uuid.uuid4())[:8]; backend_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(backend_dir, "static/previews", p_id); os.makedirs(out_dir, exist_ok=True)
+    scripts_dir = os.path.join(backend_dir, "scripts"); cmd = [sys.executable, "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
+    env = os.environ.copy(); env["PYTHONPATH"] = os.path.dirname(os.path.dirname(backend_dir)) + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
     subprocess.run(cmd, check=True, cwd=scripts_dir, env=env)
     return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
 
@@ -264,24 +251,17 @@ def generate_similar_words(req: SimilarWordsRequest):
     try:
         res = subprocess.check_output(cmd, cwd=scripts_dir, text=True, timeout=120, stderr=subprocess.STDOUT, env=os.environ.copy())
         match = re.search(r"WORDS:(.*)", res)
-        if match:
-            words = [w.strip() for w in match.group(1).split(",") if w.strip()]
-            return {"similar_words": words}
+        if match: return {"similar_words": [w.strip() for w in match.group(1).split(",") if w.strip()]}
         return {"similar_words": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/train")
 async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_current_user), db: Session = Depends(get_db)):
-    task_id = str(uuid.uuid4())[:8]
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    task_dir = os.path.join(backend_dir, "static/datasets", task_id)
-    os.makedirs(task_dir, exist_ok=True)
+    task_id = str(uuid.uuid4())[:8]; backend_dir = os.path.dirname(os.path.abspath(__file__))
+    task_dir = os.path.join(backend_dir, "static/datasets", task_id); os.makedirs(task_dir, exist_ok=True)
     generate_task_yaml(task_dir, req.wakeword, req.similar_words, req.num_samples, req.steps, req.layer_size, req.aug_rounds)
     new_task = Task(id=task_id, user_id=u.id, wakeword=req.wakeword, status="Pending", sub_status="等待中", params=req.dict(), current_step=1)
-    db.add(new_task)
-    db.commit()
-    bt.add_task(run_v2_pipeline, task_id, 1)
+    db.add(new_task); db.commit(); bt.add_task(run_v2_pipeline, task_id, 1)
     return {"task_id": task_id}
 
 @app.get("/api/models")

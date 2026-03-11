@@ -70,20 +70,20 @@ def check_wakeword(wav_path, model_path="beary.onnx"):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python check_wakeword.py <path_to_wav>")
+        print("Usage: python check_wakeword.py <path_to_wav> [path_to_onnx]")
     else:
         wav_file = sys.argv[1]
+        model_file = sys.argv[2] if len(sys.argv) > 2 else "beary.onnx"
+        
         if not os.path.exists(wav_file):
             print(f"Error: File {wav_file} not found.")
         else:
             try:
-                score = check_wakeword(wav_file)
-                print("-" * 30)
-                print(f"Wake word score: {score:.4f}")
+                score = check_wakeword(wav_file, model_path=model_file)
+                print(f"SCORE:{score:.4f}")
                 if score > 0.5:
                     print("Status: WAKE WORD DETECTED!")
                 else:
                     print("Status: No wake word detected.")
-                print("-" * 30)
             except Exception as e:
                 print(f"An error occurred: {e}")
