@@ -1,130 +1,104 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WakeWord Studio</title>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <title>唤醒词工作室 - WakeWord Studio</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; }
-        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
-        .navbar { background: white; padding: 0.5rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
-        .nav-links { display: flex; gap: 2rem; margin-left: 3rem; flex: 1; }
-        .nav-item { cursor: pointer; padding: 1rem 0; border-bottom: 2px solid transparent; color: #64748b; font-weight: 500; }
-        .nav-item.active { border-bottom-color: var(--primary); color: var(--primary); }
-        .layout { display: grid; grid-template-columns: 1fr 420px; gap: 2rem; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
+        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; }
+        body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; }
+        .navbar { background: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
+        .layout { display: grid; grid-template-columns: 1fr 380px; gap: 2rem; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: #1e293b; }
         .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
         .badge.Completed { background: #dcfce7; color: #166534; }
         .badge.Running { background: #dbeafe; color: #1e40af; }
         .badge.Failed { background: #fee2e2; color: #991b1b; }
-        input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; }
-        input[type="range"] { margin-bottom: 2rem; padding: 0; }
+        input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
         button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
-        .btn-primary:hover { opacity: 0.9; }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary:hover:not(:disabled) { opacity: 0.9; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
         .audio-preview { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; background: #f1f5f9; padding: 1rem; border-radius: 8px; }
-        .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
-        .progress-bar { height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 1rem; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s ease-in-out; }
-        .steps-container { display: flex; justify-content: space-between; margin-top: 1rem; position: relative; padding: 0 5px; }
-        .step-dot { width: 14px; height: 14px; border-radius: 50%; background: #e2e8f0; z-index: 2; border: 2px solid white; transition: all 0.3s; }
-        .step-dot.active { background: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
-        .step-dot.completed { background: var(--success); }
-        .step-dot.failed { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
-        .step-dot.retryable:hover { transform: scale(1.3); cursor: pointer; border-color: var(--primary); }
-        .step-line { position: absolute; top: 8px; left: 10px; right: 10px; height: 2px; background: #e2e8f0; z-index: 1; }
-        .step-names { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.6rem; color: #94a3b8; }
-        .step-name.active { color: var(--primary); font-weight: bold; }
-        .model-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
-        .recall-tag { background: #fef3c7; color: #92400e; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; margin-top: 0.5rem; display: inline-block; }
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-        .modal-content { background: white; padding: 2rem; border-radius: 12px; width: 450px; position: relative; }
-        .mic-button { width: 80px; height: 80px; border-radius: 50%; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 2rem auto; cursor: pointer; transition: all 0.2s; border: none; }
-        .mic-button.recording { background: #ef4444; color: white; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
-        .test-score { text-align: center; margin-top: 1.5rem; min-height: 80px; }
-        .score-val { font-size: 2.5rem; font-weight: 800; color: var(--primary); transition: all 0.2s; }
-        .detected-alert { background: var(--success); color: white; padding: 1rem; border-radius: 8px; margin-top: 1rem; text-align: center; animation: slideIn 0.3s; }
-        .word-tag { display: inline-flex; align-items: center; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 0.4rem 0.8rem; border-radius: 8px; margin: 0.3rem; gap: 0.5rem; }
-        .word-delete { cursor: pointer; color: #94a3b8; font-weight: bold; }
-        .word-delete:hover { color: #ef4444; }
+        .task-item { padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
+        .progress-bar { height: 6px; background: #e2e8f0; border-radius: 3px; margin-top: 0.5rem; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s; }
+        .status-text { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useCallback } = React;
 
         const App = () => {
             const [user, setUser] = useState(null);
             const [token, setToken] = useState(localStorage.getItem('token'));
-            const [activeTab, setActiveTab] = useState("train");
             const [wakeword, setWakeword] = useState("");
             const [speaker, setSpeaker] = useState("vivian");
             const [previews, setPreviews] = useState([]);
-            const [similarWords, setSimilarWords] = useState([]);
             const [tasks, setTasks] = useState([]);
-            const [models, setModels] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [uiStep, setUiStep] = useState(1); 
-            const [selectedPlot, setSelectedPlot] = useState(null);
-            
-            const [testingModel, setTestingModel] = useState(null);
-            const [isListening, setIsListening] = useState(false);
-            const [currentScore, setCurrentScore] = useState(0);
-            const [isDetected, setIsDetected] = useState(false);
-            const mediaRecorder = useRef(null);
-            const detectedTimeout = useRef(null);
+            const [uiStep, setUiStep] = useState(1);
 
-            const [numSamples, setNumSamples] = useState(100);
-            const [epochs, setEpochs] = useState(50);
+            // 智能适配 API 路径
+            const getApiBase = () => {
+                const path = window.location.pathname;
+                if (path.startsWith('/site')) return '/site/api';
+                return '/api';
+            };
+            const API = getApiBase();
 
-            const BASE = "/site";
-            const API = `${BASE}/api`;
-            
-            // 前端只展示 4 个关键点 (重采样在后台进行)
-            const DISPLAY_STEPS = ["正式样本", "近似样本", "样本增强", "模型训练"];
+            const fetchUser = useCallback((t) => {
+                fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
+                .then(r => r.ok ? r.json() : Promise.reject())
+                .then(data => setUser(data))
+                .catch(() => logout());
+            }, [API]);
+
+            const fetchTasks = useCallback((t) => {
+                if (!t) return;
+                fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }})
+                .then(r => r.ok ? r.json() : [])
+                .then(data => setTasks(data))
+                .catch(() => {});
+            }, [API]);
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
-                const t = params.get('token');
+                const t = params.get('token') || token;
                 if (t) {
                     setToken(t);
                     localStorage.setItem('token', t);
-                    window.history.replaceState({}, "", window.location.pathname);
+                    // 清理 URL 中的 token
+                    if (params.has('token')) {
+                        window.history.replaceState({}, "", window.location.pathname);
+                    }
+                    fetchUser(t);
+                    fetchTasks(t);
                 }
-                fetchUser();
-                fetchTasks();
-                const timer = setInterval(fetchTasks, 3000);
+            }, []);
+
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    if (token) fetchTasks(token);
+                }, 4000);
                 return () => clearInterval(timer);
-            }, [token]);
+            }, [token, fetchTasks]);
 
-            useEffect(() => { if (activeTab === "models") fetchModels(); }, [activeTab]);
-
-            const fetchUser = () => {
-                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                fetch(`${API}/me`, { headers }).then(r => r.ok ? r.json() : null).then(u => { if (u) setUser(u); });
+            const logout = () => {
+                setUser(null);
+                setToken(null);
+                localStorage.removeItem('token');
             };
-
-            const fetchTasks = () => {
-                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                fetch(`${API}/my-tasks`, { headers }).then(r => r.ok ? r.json() : []).then(setTasks);
-            };
-
-            const fetchModels = () => {
-                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                fetch(`${API}/models`, { headers }).then(r => r.json()).then(setModels);
-            };
-
-            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
             const handlePreview = async () => {
+                if (!wakeword) return;
                 setLoading(true);
                 try {
                     const res = await fetch(`${API}/preview`, {
@@ -134,27 +108,10 @@
                     });
                     const data = await res.json();
                     setPreviews(data.urls || []);
-                } catch(e) { alert("Preview failed"); }
+                } catch (e) {
+                    alert("预览生成失败，请检查后端日志");
+                }
                 setLoading(false);
-            };
-
-            const handleGetSimilarWords = async () => {
-                setLoading(true);
-                try {
-                    const res = await fetch(`${API}/generate-similar-words`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword })
-                    });
-                    const data = await res.json();
-                    setSimilarWords(data.similar_words || []);
-                    setUiStep(2);
-                } catch(e) { alert("Failed to generate similar words"); }
-                setLoading(false);
-            };
-
-            const removeSimilarWord = (word) => {
-                setSimilarWords(prev => prev.filter(w => w !== word));
             };
 
             const handleTrain = async () => {
@@ -163,196 +120,104 @@
                     const res = await fetch(`${API}/train`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword, similar_words: similarWords, num_samples: numSamples, epochs: epochs })
+                        body: JSON.stringify({ wakeword, num_samples: 2000, epochs: 50 })
                     });
-                    if (res.ok) { 
-                        setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]);
-                        fetchTasks(); 
+                    if (res.ok) {
+                        alert("训练任务已提交！");
+                        setUiStep(1); setWakeword(""); setPreviews([]);
+                        fetchTasks(token);
                     }
-                } catch(e) { alert("Failed to start training"); }
+                } catch (e) {
+                    alert("提交失败");
+                }
                 setLoading(false);
             };
 
-            const handleRetry = async (taskId, displayStep) => {
-                // 将前端展示步数 (1-4) 映射回后端逻辑步数 (1-5)
-                const stepMap = { 1: 1, 2: 2, 3: 4, 4: 5 }; 
-                const backendStep = stepMap[displayStep];
-                if (!window.confirm(`确定要从步骤 "${DISPLAY_STEPS[displayStep-1]}" 重试吗？`)) return;
-                const res = await fetch(`${API}/retry/${taskId}?step=${backendStep}`, { method: 'POST' });
-                if (res.ok) { fetchTasks(); }
-            };
-
-            const getDisplayStepInfo = (subStatus) => {
-                if (!subStatus) return { current: 0, total: 4 };
-                const match = subStatus.match(/(\d)\/5/);
-                if (!match) return { current: 0, total: 4 };
-                const backendStep = parseInt(match[1]);
-                
-                // 映射逻辑：
-                // 1/5 -> 点 1
-                // 2/5 -> 点 2
-                // 3/5 -> 点 2 (重采样时点不移动，保持在近似样本)
-                // 4/5 -> 点 3
-                // 5/5 -> 点 4
-                const displayMap = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 4 };
-                return { current: displayMap[backendStep] || 0, total: 4 };
+            const getStatusLabel = (status) => {
+                const map = { 'Running': '进行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待中' };
+                return map[status] || status;
             };
 
             if (!user) return (
                 <div style={{display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
-                    <h1>🐻 WakeWord Studio</h1>
-                    <button onClick={() => window.location.href=`${BASE}/login/github`} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>Login with GitHub</button>
-                    <button onClick={() => setUser({username: 'Guest'})} style={{marginTop: '1rem', background: 'none', border: 'none', color: 'blue', cursor: 'pointer', textDecoration: 'underline'}}>Local Preview</button>
+                    <h1>🐻 唤醒词工作室</h1>
+                    <p>在线训练您的自定义唤醒词模型。</p>
+                    <button onClick={() => window.location.href='/site/login/github'} className="btn-primary" style={{width: 'auto', padding: '1rem 2rem'}}>通过 GitHub 登录</button>
                 </div>
             );
 
             return (
                 <div>
-                    {selectedPlot && (
-                        <div className="modal-overlay" onClick={() => setSelectedPlot(null)}>
-                            <div className="modal-content" style={{width: 'auto'}}>
-                                <img src={selectedPlot} style={{maxWidth: '100%', borderRadius: '8px'}} />
-                                <button onClick={() => setSelectedPlot(null)} className="btn-outline" style={{marginTop: '1rem'}}>Close</button>
-                            </div>
-                        </div>
-                    )}
-
-                    {testingModel && (
-                        <div className="modal-overlay">
-                            <div className="modal-content" style={{textAlign: 'center'}}>
-                                <h3>Listening: {testingModel.wakeword}</h3>
-                                <button className={`mic-button ${isListening ? 'recording' : ''}`} onClick={toggleListening}>
-                                    {isListening ? "Stop" : "🎤 Start Listening"}
-                                </button>
-                                <div className="test-score">
-                                    <div className="score-val" style={{color: currentScore > 0.5 ? '#10b981' : ''}}>{(currentScore * 100).toFixed(1)}%</div>
-                                </div>
-                                {isDetected && <div className="detected-alert">✨ DETECTED!</div>}
-                                <button onClick={() => {stopListening(); setTestingModel(null);}} className="btn-outline" style={{marginTop: '2rem'}}>Close</button>
-                            </div>
-                        </div>
-                    )}
-
                     <div className="navbar">
-                        <strong style={{fontSize: '1.2rem', color: '#1e293b'}}>WakeWord Studio</strong>
-                        <div className="nav-links">
-                            <div className={`nav-item ${activeTab === 'train' ? 'active' : ''}`} onClick={() => setActiveTab('train')}>Training</div>
-                            <div className={`nav-item ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Model Library</div>
-                        </div>
+                        <strong style={{fontSize: '1.2rem'}}>唤醒词工作室</strong>
                         <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                            <span style={{fontSize: '0.9rem', color: '#64748b'}}>{user.username}</span>
-                            <button onClick={logout} className="btn-outline" style={{width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.8rem'}}>Logout</button>
+                            <span>{user.username}</span>
+                            <img src={user.avatar_url} style={{width: 32, height: 32, borderRadius: '50%'}} />
+                            <button onClick={logout} className="btn-outline" style={{width: 'auto', padding: '0.4rem 0.8rem'}}>退出</button>
                         </div>
                     </div>
 
                     <div className="layout">
-                        {activeTab === 'train' ? (
-                            <React.Fragment>
-                                <div className="card">
-                                    {uiStep === 1 && (
-                                        <div>
-                                            <div className="step-header"><h2>Step 1: Audio Preview</h2></div>
-                                            <label>WakeWord Text</label>
-                                            <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="e.g. 小熊" />
-                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
-                                                {loading ? "Generating..." : "Generate Preview Samples"}
-                                            </button>
-                                            {previews.length > 0 && (
-                                                <div className="audio-preview">
-                                                    {previews.map((url, i) => (<div key={i}><audio controls src={url} style={{width: '100%'}} /></div>))}
-                                                    <button onClick={handleGetSimilarWords} className="btn-primary" style={{background: '#10b981'}}>Looks Good, Next Step</button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                        <div className="card">
+                            {uiStep === 1 ? (
+                                <div>
+                                    <div className="step-header"><h2>第一步：预览样本</h2></div>
+                                    <label>自定义唤醒词</label>
+                                    <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
+                                    <label>基础语音 (仅作为参考，实际训练会使用 voices.json)</label>
+                                    <select value={speaker} onChange={e => setSpeaker(e.target.value)}>
+                                        <option value="vivian">薇薇安 (女声)</option>
+                                        <option value="uncle_fu">福叔 (男声)</option>
+                                    </select>
+                                    <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
+                                        {loading ? "生成中..." : "生成预览样本"}
+                                    </button>
 
-                                    {uiStep === 2 && (
-                                        <div>
-                                            <div className="step-header"><h2>Step 2: Verify Similar Words</h2></div>
-                                            <div style={{marginBottom: '2rem'}}>
-                                                {similarWords.map(word => (
-                                                    <div key={word} className="word-tag">
-                                                        <span>{word}</span>
-                                                        <span className="word-delete" onClick={() => removeSimilarWord(word)}>×</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <button onClick={() => setUiStep(3)} className="btn-primary">Confirm & Next</button>
-                                            <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '1rem'}}>Back</button>
-                                        </div>
-                                    )}
-
-                                    {uiStep === 3 && (
-                                        <div>
-                                            <div className="step-header"><h2>Step 3: Training Config</h2></div>
-                                            <p>Selected Word: <strong>{wakeword}</strong></p>
-                                            <label style={{display: 'flex', justifyContent: 'space-between'}}>
-                                                <span>Dataset Size</span><strong>{numSamples} samples</strong>
-                                            </label>
-                                            <input type="range" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} min="50" max="5000" step="50" />
-                                            <label style={{display: 'flex', justifyContent: 'space-between'}}>
-                                                <span>Epochs</span><strong>{epochs} epochs</strong>
-                                            </label>
-                                            <input type="range" value={epochs} onChange={e => setEpochs(parseInt(e.target.value))} min="10" max="200" step="5" />
-                                            <button onClick={handleTrain} className="btn-primary" disabled={loading}>
-                                                {loading ? "Starting..." : "Start Full Pipeline"}
-                                            </button>
-                                            <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>Back</button>
+                                    {previews.length > 0 && (
+                                        <div className="audio-preview">
+                                            {previews.map((url, i) => (
+                                                <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>
+                                            ))}
+                                            <button onClick={() => setUiStep(2)} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}}>效果不错，下一步</button>
                                         </div>
                                     )}
                                 </div>
-
-                                <div className="card" style={{padding: '1.5rem'}}>
-                                    <h3 style={{marginTop: 0}}>Running Tasks</h3>
-                                    {tasks.length === 0 && <p style={{color: '#94a3b8'}}>No active tasks.</p>}
-                                    {tasks.map(t => {
-                                        const { current: currentStep } = getDisplayStepInfo(t.sub_status);
-                                        return (
-                                            <div key={t.id} className="task-item">
-                                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-                                                    <div>
-                                                        <strong>{t.wakeword}</strong>
-                                                        <div style={{fontSize: '0.75rem', color: t.status === 'Failed' ? '#ef4444' : '#64748b'}}>{t.sub_status}</div>
-                                                    </div>
-                                                    <span className={`badge ${t.status}`}>{t.status}</span>
-                                                </div>
-                                                <div className="progress-bar"><div className="progress-fill" style={{width: `${t.progress}%`, background: t.status === 'Failed' ? '#ef4444' : ''}}></div></div>
-                                                <div className="steps-container">
-                                                    <div className="step-line"></div>
-                                                    {[1, 2, 3, 4].map(s => (
-                                                        <div key={s} onClick={() => handleRetry(t.id, s)} className={`step-dot retryable ${s < currentStep ? 'completed' : s === currentStep ? (t.status === 'Failed' ? 'failed' : 'active') : ''}`}></div>
-                                                    ))}
-                                                </div>
-                                                <div className="step-names">
-                                                    {DISPLAY_STEPS.map((name, idx) => (<div key={idx} className={`step-name ${idx+1===currentStep ? 'active' : ''}`}>{name}</div>))}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                            ) : (
+                                <div>
+                                    <div className="step-header"><h2>第二步：训练配置</h2></div>
+                                    <p>选定词汇: <strong>{wakeword}</strong></p>
+                                    <label>数据集大小: 2000 个样本</label>
+                                    <input type="range" disabled />
+                                    <label>训练强度: 50 轮 (Epochs)</label>
+                                    <input type="range" disabled />
+                                    <button onClick={handleTrain} className="btn-primary" disabled={loading}>
+                                        {loading ? "提交中..." : "开始完整流水线"}
+                                    </button>
+                                    <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
                                 </div>
-                            </React.Fragment>
-                        ) : (
-                            <div className="card" style={{gridColumn: '1 / span 2'}}>
-                                <h2>Model Library</h2>
-                                {models.map(m => (
-                                    <div key={m.id} className="model-card">
-                                        <div>
-                                            <strong style={{fontSize: '1.2rem'}}>{m.wakeword}</strong>
-                                            <div style={{fontSize: '0.8rem', color: '#94a3b8'}}>{m.id} • {new Date(m.created_at).toLocaleDateString()}</div>
-                                            <div style={{display: 'flex', gap: '0.5rem'}}>
-                                                <span className="recall-tag">Samples: {m.params.num_samples}</span>
-                                                <span className="recall-tag">Recall: {(m.recall * 100).toFixed(1)}%</span>
-                                            </div>
-                                        </div>
-                                        <div style={{display: 'flex', gap: '1rem'}}>
-                                            {m.plot_url && <button onClick={() => setSelectedPlot(m.plot_url)} className="btn-outline" style={{width: 'auto'}}>View Plot</button>}
-                                            <button onClick={() => setTestingModel(m)} className="btn-outline" style={{width: 'auto', borderColor: '#10b981', color: '#10b981'}}>Test Online</button>
-                                            <button onClick={() => window.open(m.download_url)} className="btn-primary" style={{width: 'auto'}}>Download</button>
-                                        </div>
+                            )}
+                        </div>
+
+                        <div className="card" style={{padding: '1.5rem'}}>
+                            <h3>最近任务</h3>
+                            {tasks.length === 0 && <p style={{color: '#94a3b8'}}>暂无训练记录。</p>}
+                            {tasks.map(t => (
+                                <div key={t.id} className="task-item">
+                                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                        <strong>{t.wakeword}</strong>
+                                        <span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span>
                                     </div>
-                                ))}
-                            </div>
-                        )}
+                                    <div className="progress-bar">
+                                        <div className="progress-fill" style={{width: `${t.progress || 0}%`}}></div>
+                                    </div>
+                                    <div className="status-text">{t.sub_status || '等待中...'}</div>
+                                    <div style={{fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem'}}>
+                                        {t.created_at ? new Date(t.created_at).toLocaleString() : ''}
+                                    </div>
+                                </div>
+                            ))}
+                            <button onClick={() => fetchTasks(token)} className="btn-outline" style={{marginTop: '1rem', padding: '0.5rem'}}>手动刷新历史</button>
+                        </div>
                     </div>
                 </div>
             );

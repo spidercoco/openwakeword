@@ -13,21 +13,36 @@ def get_similar_words(wakeword):
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
 
-    prompt = f"""你是一个语音算法辅助助手。请为唤醒词 "{wakeword}" 生成 10-15 个在中文发音上非常相近、容易引起误触发的词语或短语。
-    要求：
-    1. 包含声母相同、韵母相同或声调相近的词。
-    2. 返回格式必须是纯 JSON 字符串数组，例如：["词1", "词2", "词3"]。
-    3. 不要包含任何解释性文字。
-    """
+    prompt = f"""你是一个中文语音对抗样本生成器。
+
+输入：一个中文词语
+
+目标：生成大量读音非常接近但绝对不能发音完全一样的词语。
+
+要求：
+1. 拼音相似度 >= 80%
+2. 可以改变：
+   - 声母
+   - 韵母
+   - 声调
+3. 可以生成无意义词语
+4. 保持相同字数
+5. 不要解释
+用json的列表返回。
+
+**请在返回前再次根据声母，韵母，声调分别确认，绝对不能和原词语完全一样。**
+
+输入词语："{wakeword}"
+"""
 
     try:
         completion = client.chat.completions.create(
-            model="qwen-plus",
+            model="qwen3.5-plus",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that only outputs JSON arrays."},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"} if False else None # 某些模型支持，这里手动解析更稳
+            extra_body={"enable_thinking": True}
         )
         
         content = completion.choices[0].message.content
