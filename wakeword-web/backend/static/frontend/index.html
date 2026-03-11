@@ -172,11 +172,6 @@
                                     <div className="step-header"><h2>第一步：预览样本</h2></div>
                                     <label>自定义唤醒词</label>
                                     <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
-                                    <label>基础语音 (仅作为参考，实际训练会使用 voices.json)</label>
-                                    <select value={speaker} onChange={e => setSpeaker(e.target.value)}>
-                                        <option value="vivian">薇薇安 (女声)</option>
-                                        <option value="uncle_fu">福叔 (男声)</option>
-                                    </select>
                                     <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
                                         {loading ? "生成中..." : "生成预览样本"}
                                     </button>
