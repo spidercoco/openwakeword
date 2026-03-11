@@ -262,19 +262,25 @@ async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
 
 @app.post("/api/generate-similar-words")
 def generate_similar_words(req: SimilarWordsRequest):
+    import sys
     scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
-    cmd = ["python", "v2_gen_word_list.py", "--wakeword", req.wakeword]
+    # 使用当前 Python 解释器，并显式继承环境变量
+    cmd = [sys.executable, "v2_gen_word_list.py", "--wakeword", req.wakeword]
     try:
-        # 在线程池中执行，不会阻塞主事件循环
-        res = subprocess.check_output(cmd, cwd=scripts_dir, text=True, timeout=120)
+        print(f"Executing LLM script: {' '.join(cmd)}")
+        res = subprocess.check_output(cmd, cwd=scripts_dir, text=True, timeout=120, stderr=subprocess.STDOUT, env=os.environ.copy())
         match = re.search(r"WORDS:(.*)", res)
         if match:
             words = [w.strip() for w in match.group(1).split(",") if w.strip()]
             return {"similar_words": words}
+        print(f"LLM Output format error: {res}")
         return {"similar_words": []}
+    except subprocess.CalledProcessError as e:
+        print(f"LLM Script Failed (Exit {e.returncode}):\n{e.output}")
+        raise HTTPException(status_code=500, detail=f"LLM script failed: {e.output}")
     except Exception as e:
         print(f"LLM Error: {e}")
-        return {"similar_words": ["测试词1", "测试词2", "测试词3"]}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/train")
 async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_current_user), db: Session = Depends(get_db)):
