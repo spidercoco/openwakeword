@@ -2,16 +2,15 @@ import os
 import argparse
 import json
 import re
-from openai import OpenAI
+import dashscope
+from dashscope import Generation
 
 # 建议在运行前配置环境变量 DASHSCOPE_API_KEY
 # export DASHSCOPE_API_KEY="your-api-key"
 
 def get_similar_words(wakeword):
-    client = OpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    )
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    model_name = "qwen3.5-plus"
 
     prompt = f"""你是一个中文语音对抗样本生成器。
 
@@ -35,26 +34,52 @@ def get_similar_words(wakeword):
 输入词语："{wakeword}"
 """
 
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant that only outputs JSON arrays."},
+        {"role": "user", "content": prompt}
+    ]
+
+    print(f"--- LLM Call (DashScope) ---")
+    print(f"Model: {model_name}")
+    print(f"Prompt: {wakeword}")
+    print(f"----------------------------")
+
     try:
-        completion = client.chat.completions.create(
-            model="qwen3.5-plus",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that only outputs JSON arrays."},
-                {"role": "user", "content": prompt},
-            ],
-            extra_body={"enable_thinking": True}
+        response = Generation.call(
+            api_key=api_key,
+            model=model_name,
+            messages=messages,
+            result_format="message",
+            enable_thinking=True
         )
-        
-        content = completion.choices[0].message.content
-        # 尝试从返回内容中提取 JSON 数组
-        match = re.search(r"\[.*\]", content, re.DOTALL)
-        if match:
-            words = json.loads(match.group(0))
-            return words
+
+        if response.status_code == 200:
+            msg = response.output.choices[0].message
+            
+            # 打印思考过程（如果存在）
+            if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
+                print("--- 思考过程 ---")
+                print(msg.reasoning_content)
+                print("----------------")
+
+            answer_content = msg.content
+            print("--- 完整回复 ---")
+            print(answer_content)
+            print("----------------")
+
+            # 尝试从返回内容中提取 JSON 数组
+            match = re.search(r"\[.*\]", answer_content, re.DOTALL)
+            if match:
+                words = json.loads(match.group(0))
+                return words
+            else:
+                return [wakeword + "类似"]
         else:
-            return [wakeword + "类似"] # 保底
+            print(f"API Error: {response.code} - {response.message}")
+            return []
+            
     except Exception as e:
-        print(f"Error calling LLM: {e}")
+        print(f"Error calling DashScope: {e}")
         return []
 
 if __name__ == "__main__":

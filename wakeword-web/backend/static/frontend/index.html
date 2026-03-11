@@ -47,7 +47,7 @@
         const App = () => {
             const [user, setUser] = useState(null);
             const [token, setToken] = useState(localStorage.getItem('token'));
-            const [activeTab, setActiveTab] = useState("train"); // "train" or "models"
+            const [activeTab, setActiveTab] = useState("train");
             const [wakeword, setWakeword] = useState("");
             const [previews, setPreviews] = useState([]);
             const [similarWords, setSimilarWords] = useState([]);
@@ -123,7 +123,7 @@
 
             const handleGetSimilars = async () => {
                 setLoading(true);
-                setPreviews([]); // 清空预览音频减少界面冗余
+                // 注意：这里不再清空 previews，以保持 UI 稳定
                 try {
                     const res = await fetch(`${API}/generate-similar-words`, {
                         method: 'POST',
@@ -133,10 +133,7 @@
                     const data = await res.json();
                     setSimilarWords(data.similar_words || []);
                     setUiStep(2);
-                } catch (e) { 
-                    console.error(e);
-                    alert("生成近似词失败，请检查网络或后端配置"); 
-                }
+                } catch (e) { alert("生成近似词失败"); }
                 setLoading(false);
             };
 
@@ -194,7 +191,7 @@
                                             <label>自定义唤醒词</label>
                                             <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
                                             <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
-                                                {loading ? "正在由 Qwen3-TTS 生成..." : "生成预览样本"}
+                                                {loading && uiStep === 1 && !previews.length ? "正在由 Qwen3-TTS 生成..." : "生成预览样本"}
                                             </button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
@@ -203,7 +200,8 @@
                                                     ))}
                                                     <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>
                                                         {loading ? "Qwen3.5-Plus 深度思考中..." : "效果不错，下一步"}
-                                                    </button>                                                </div>
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
                                     )}
@@ -216,8 +214,10 @@
                                                 {similarWords.map((w, i) => <span key={i} className="tag">{w}</span>)}
                                             </div>
                                             <button onClick={() => setUiStep(3)} className="btn-primary">确认词汇，继续下一步</button>
-                                            <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>重新生成</button>
-                                            <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
+                                            <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>
+                                                {loading ? "重新生成中..." : "重新生成"}
+                                            </button>
+                                            <button onClick={() => { setUiStep(1); setPreviews([]); }} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
                                         </div>
                                     )}
 
@@ -276,7 +276,6 @@
                                         </div>
                                     </div>
                                 ))}
-                                <button onClick={() => fetchTasks(token)} className="btn-outline" style={{marginTop: '1rem', padding: '0.5rem'}}>手动刷新状态</button>
                             </div>
                         </div>
                     </div>
