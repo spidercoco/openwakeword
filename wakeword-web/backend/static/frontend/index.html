@@ -138,6 +138,22 @@
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
+            const handleRetry = async (taskId, step) => {
+                try {
+                    const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                        fetchTasks(token);
+                    } else {
+                        alert("重试请求失败");
+                    }
+                } catch (e) {
+                    alert("网络错误");
+                }
+            };
+
             // --- 实时音频测试逻辑 ---
             const startLiveTest = async (model) => {
                 setTestingModel(model);
@@ -346,6 +362,14 @@
                                         <div style={{display: 'flex', justifyContent: 'space-between'}}><strong>{t.wakeword}</strong><span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span></div>
                                         <div className="progress-bar"><div className="progress-fill" style={{width: `${t.progress || 0}%`}}></div></div>
                                         <div className="status-text">{t.sub_status}</div>
+                                        
+                                        {/* 重试按钮组 */}
+                                        {(t.status === 'Completed' || t.status === 'Failed') && (
+                                            <div style={{marginTop: '0.8rem', display: 'flex', gap: '0.4rem'}}>
+                                                <button onClick={() => handleRetry(t.id, 1)} style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem', width: 'auto'}} className="btn-outline">全部重试</button>
+                                                <button onClick={() => handleRetry(t.id, 5)} style={{padding: '0.3rem 0.6rem', fontSize: '0.75rem', width: 'auto', borderColor: '#10b981', color: '#10b981'}} className="btn-outline">仅重试训练</button>
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                             </div>

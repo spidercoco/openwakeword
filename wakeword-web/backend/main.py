@@ -262,6 +262,17 @@ async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_c
     db.add(new_task); db.commit(); bt.add_task(run_v2_pipeline, task_id, 1)
     return {"task_id": task_id}
 
+@app.post("/api/retry/{task_id}")
+async def retry_task(task_id: str, bt: BackgroundTasks, step: int = None, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task: raise HTTPException(status_code=404, detail="Task not found")
+    start_from = step if step is not None else task.current_step
+    task.status = "Pending"
+    task.sub_status = f"准备从第 {start_from} 步重试..."
+    db.commit()
+    bt.add_task(run_v2_pipeline, task_id, start_from)
+    return {"message": "Retry started"}
+
 @app.get("/api/models")
 async def list_models(user=Depends(get_current_user), db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").all()
