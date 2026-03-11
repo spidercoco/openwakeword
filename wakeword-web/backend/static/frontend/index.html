@@ -326,14 +326,16 @@
                                     <div className="model-list">
                                         {models.length === 0 && <p style={{color: '#94a3b8'}}>尚未有训练完成的模型。</p>}
                                         {models.map(m => (
-                                            <div key={m.id} className="model-row">
-                                                <div className="model-info">
-                                                    <h4>{m.wakeword}</h4>
-                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步</p>
-                                                </div>
-                                                <div style={{display: 'flex', gap: '0.5rem'}}>
-                                                    <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981'}}>下载</button>
-                                                    <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm">测试</button>
+                                            <div key={m.id} className="model-row" style={{flexDirection: 'column', alignItems: 'flex-start'}}>
+                                                <h4 style={{margin: '0 0 0.5rem 0'}}>{m.wakeword}</h4>
+                                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
+                                                    <p style={{margin: 0, fontSize: '0.8rem', color: '#64748b'}}>
+                                                        ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步
+                                                    </p>
+                                                    <div style={{display: 'flex', gap: '0.5rem'}}>
+                                                        <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981', padding: '0.2rem 0.5rem'}}>下载</button>
+                                                        <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm" style={{padding: '0.2rem 0.5rem'}}>测试</button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}

@@ -127,14 +127,26 @@ def get_dynamic_config(n_samples, steps, layer_size, aug_rounds):
     }
 
 def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, layer_size, aug_rounds):
+    # 1. 读入原始模板
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    template_path = os.path.join(root_dir, "my_model.yaml")
+    
+    config_data = {}
+    if os.path.exists(template_path):
+        with open(template_path, 'r', encoding="utf-8") as f:
+            config_data = yaml.safe_load(f)
+    
+    # 2. 计算动态参数并覆盖
     dynamic = get_dynamic_config(n_samples, steps, layer_size, aug_rounds)
-    config_data = {
-        "target_phrase": wakeword, "similar_phrases": similar_words,
-        "model_name": "beary_custom", "model_type": "dnn", "epochs": 50,
-        "target_false_positives_per_hour": 0.2, "false_positive_validation_data_path": "validation_set_features.npy",
-        "feature_data_files": {"ACAV100M_sample": "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"}
-    }
+    config_data.update({
+        "target_phrase": wakeword,
+        "similar_phrases": similar_words,
+        "model_name": "beary_custom",
+        "output_dir": task_dir # 关键：确保模型输出到正确的任务目录
+    })
     config_data.update(dynamic)
+
+    # 3. 写入任务目录
     with open(os.path.join(task_dir, "config.yaml"), "w", encoding="utf-8") as f:
         yaml.dump(config_data, f, allow_unicode=True)
 
@@ -152,10 +164,12 @@ def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress
             current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
         
         if target_total > 0:
-            percent = int(start_progress + (end_progress - start_progress) * (min(current_count, target_total) / target_total))
+            # 计算该步骤内的百分比 (0-100)
+            step_percent = int((min(current_count, target_total) / target_total) * 100)
             db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
             if t_u:
-                t_u.progress = percent
+                # 数据库存储该步骤内的进度
+                t_u.progress = step_percent
                 t_u.sub_status = f"{sub_status_msg} ({current_count}/{target_total})"
                 db_u.commit()
             db_u.close()
