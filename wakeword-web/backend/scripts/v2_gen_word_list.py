@@ -10,7 +10,7 @@ from dashscope import Generation
 
 def get_similar_words(wakeword):
     api_key = os.getenv("DASHSCOPE_API_KEY")
-    model_name = "qwen3.5-plus"
+    model_name = "qwen-max"
 
     prompt = f"""你是一个中文语音对抗样本生成器。
 
@@ -50,17 +50,13 @@ def get_similar_words(wakeword):
             model=model_name,
             messages=messages,
             result_format="message",
-            enable_thinking=True
+            #enable_thinking=True
         )
 
         if response.status_code == 200:
             msg = response.output.choices[0].message
             
             # 打印思考过程（如果存在）
-            if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
-                print("--- 思考过程 ---")
-                print(msg.reasoning_content)
-                print("----------------")
 
             answer_content = msg.content
             print("--- 完整回复 ---")
