@@ -9,6 +9,7 @@ import soundfile as sf
 import random
 import yaml
 import json
+import shutil
 from tqdm import tqdm
 from pathlib import Path
 
@@ -25,7 +26,6 @@ DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is
 # 加载声音描述库
 VOICE_DATA = []
 try:
-    # voices.json 现在就在 scripts 目录下
     script_dir = os.path.dirname(os.path.abspath(__file__))
     voices_path = os.path.join(script_dir, "voices.json")
     if os.path.exists(voices_path):
@@ -52,10 +52,25 @@ def trim_end_silence(audio, threshold=0.005):
     if not np.any(mask): return audio
     return audio[:len(audio) - np.argmax(mask[::-1])]
 
-def generate_samples(text, max_samples, output_dir, batch_size=1, model=None):
+def generate_samples(text, max_samples, output_dir, batch_size=1, model=None, overwrite=False):
     os.makedirs(output_dir, exist_ok=True)
-    current_count = 0
-    pbar = tqdm(total=max_samples, desc=f"Generating to {os.path.basename(output_dir)}")
+    
+    if overwrite:
+        print(f"Overwrite mode: Clearing {output_dir}...")
+        for f in os.listdir(output_dir):
+            if f.endswith(".wav"): os.remove(os.path.join(output_dir, f))
+        current_count = 0
+    else:
+        existing_files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
+        current_count = len(existing_files)
+    
+    if current_count >= max_samples:
+        print(f"Target reached: {current_count}/{max_samples}. Skipping.")
+        print(f"PROGRESS:{current_count}/{max_samples}", flush=True)
+        return
+
+    print(f"Starting generation: {current_count} exist, need {max_samples - current_count} more.")
+    pbar = tqdm(total=max_samples, initial=current_count, desc=f"Generating to {os.path.basename(output_dir)}")
     
     while current_count < max_samples:
         current_batch_size = min(batch_size, max_samples - current_count)
@@ -63,7 +78,6 @@ def generate_samples(text, max_samples, output_dir, batch_size=1, model=None):
         batch_instructs = [get_random_instruct() for _ in range(current_batch_size)]
         
         try:
-            # 使用 VoiceDesign 模式生成
             wavs, sr = model.generate_voice_design(
                 text=batch_texts, 
                 language=["Chinese"] * current_batch_size,
@@ -79,7 +93,6 @@ def generate_samples(text, max_samples, output_dir, batch_size=1, model=None):
                 sf.write(os.path.join(output_dir, fname), audio_final, sr)
                 current_count += 1
                 pbar.update(1)
-                # 为平台进度显示
                 print(f"PROGRESS:{current_count}/{max_samples}", flush=True)
                 if current_count >= max_samples: break
         except Exception as e:
@@ -90,26 +103,23 @@ def generate_samples(text, max_samples, output_dir, batch_size=1, model=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--overwrite", action="store_true", help="Clear output directory before starting")
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.Loader)
 
-    # 脚本运行在 task_dir，所有路径基于此
     task_root = os.path.dirname(os.path.abspath(args.config))
-    
-    # 路径加上 _tts 后缀
     train_dir = os.path.join(task_root, "positive_train_tts")
     test_dir = os.path.join(task_root, "positive_test_tts")
 
-    # 加载模型
     dtype = torch.bfloat16 if "cuda" in DEVICE else (torch.float16 if "mps" in DEVICE else torch.float32)
     model = Qwen3TTSModel.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=dtype, trust_remote_code=True)
 
     print(f"Generating training positives...")
-    generate_samples(config["target_phrase"], config["n_samples"], train_dir, config.get("tts_batch_size", 1), model)
+    generate_samples(config["target_phrase"], config["n_samples"], train_dir, config.get("tts_batch_size", 1), model, overwrite=args.overwrite)
     
     print(f"Generating testing positives...")
-    generate_samples(config["target_phrase"], config["n_samples_val"], test_dir, config.get("tts_batch_size", 1), model)
+    generate_samples(config["target_phrase"], config["n_samples_val"], test_dir, config.get("tts_batch_size", 1), model, overwrite=args.overwrite)
     
     print("Done.")

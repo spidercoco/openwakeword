@@ -29,9 +29,16 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
+        .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.75rem; width: auto; height: auto; display: inline-flex; align-items: center; justify-content: center; }
         .btn-retry { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; font-size: 1.1rem; }
         .btn-retry:hover { border-color: var(--primary); color: var(--primary); background: #eff6ff; transform: rotate(90deg); }
         .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
+        /* 模型列表样式 */
+        .model-list { display: flex; flex-direction: column; }
+        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
+        .model-row:last-child { border-bottom: none; }
+        .model-info h4 { margin: 0 0 0.2rem 0; color: #1e293b; }
+        .model-info p { margin: 0; font-size: 0.8rem; color: #64748b; }
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
         .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.4rem 0; color: #64748b; }
         .pipeline-step.active { color: var(--primary); font-weight: bold; }
@@ -83,11 +90,13 @@
 
             const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
 
-            // 任务排序逻辑：未完成在前
             const sortedTasks = useMemo(() => {
                 return [...tasks].sort((a, b) => {
                     const order = { 'Running': 0, 'Pending': 1, 'Failed': 2, 'Completed': 3 };
-                    return (order[a.status] || 99) - (order[b.status] || 99);
+                    const sA = order[a.status] !== undefined ? order[a.status] : 99;
+                    const sB = order[b.status] !== undefined ? order[b.status] : 99;
+                    if (sA !== sB) return sA - sB;
+                    return new Date(b.created_at) - new Date(a.created_at);
                 });
             }, [tasks]);
 
@@ -185,8 +194,7 @@
                         body: JSON.stringify({ wakeword })
                     });
                     const data = await res.json();
-                    setSimilarWords(data.similar_words || []);
-                    setUiStep(2);
+                    setSimilarWords(data.similar_words || []); setUiStep(2);
                 } catch (e) { alert("生成失败"); }
                 setLoading(false);
             };
@@ -212,17 +220,23 @@
                 const isCurrent = task.current_step === stepNum && task.status === "Running";
                 const isDone = task.current_step > stepNum || task.status === "Completed";
                 const isFailed = task.current_step === stepNum && task.status === "Failed";
-                let statusIcon = "⚪";
-                let className = "pipeline-step";
+                let statusIcon = "⚪"; let className = "pipeline-step";
                 if (isDone) { statusIcon = "✅"; className += " done"; }
                 else if (isCurrent) { statusIcon = "⏳"; className += " active"; }
                 else if (isFailed) { statusIcon = "❌"; className += " fail"; }
 
                 return (
                     <div className={className}>
-                        <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
-                            <span>{statusIcon} {label}</span>
-                            {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
+                        <div style={{flex: 1}}>
+                            <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                                <span>{statusIcon} {label}</span>
+                                {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
+                            </div>
+                            {isCurrent && task.sub_status.includes("(") && (
+                                <div style={{fontSize: '0.7rem', color: var(--primary), marginLeft: '22px', marginTop: '2px'}}>
+                                    进度: {task.sub_status.split("(")[1].replace(")", "")}
+                                </div>
+                            )}
                         </div>
                         {(task.status !== 'Running') && (
                             <div className="btn-retry" title="从该步重试" onClick={() => handleRetry(task.id, stepNum)}>↻</div>
@@ -256,19 +270,7 @@
                                         <div>
                                             <div className="step-header"><h2>第一步：生成预览样本</h2></div>
                                             <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="输入唤醒词，例如：小熊" />
-                                            <button onClick={async () => {
-                                                setLoading(true);
-                                                try {
-                                                    const res = await fetch(`${API}/preview`, {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                                        body: JSON.stringify({ wakeword })
-                                                    });
-                                                    const data = await res.json();
-                                                    setPreviews(data.urls || []);
-                                                } catch (e) { alert("预览失败"); }
-                                                setLoading(false);
-                                            }} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
+                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
                                                     {previews.map((url, i) => <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>)}
@@ -295,10 +297,10 @@
                                     {uiStep === 3 && (
                                         <div>
                                             <div className="step-header"><h2>第三步：训练配置</h2></div>
-                                            <div className="param-group"><span>样本数: {numSamples}</span><input type="range" min="100" max="5000" step="100" value={numSamples} onChange={e => setNumSamples(e.target.value)} /></div>
-                                            <div className="param-group"><span>步数: {trainSteps}</span><input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(e.target.value)} /></div>
+                                            <div className="param-group"><span>样本数: {numSamples.toLocaleString()}</span><input type="range" min="100" max="200000" step="100" value={numSamples} onChange={e => setNumSamples(parseInt(e.target.value))} /></div>
+                                            <div className="param-group"><span>步数: {trainSteps.toLocaleString()}</span><input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(parseInt(e.target.value))} /></div>
                                             <div className="param-group"><span>层大小</span><select value={layerSize} onChange={e => setLayerSize(e.target.value)}><option value="32">32</option><option value="64">64</option><option value="128">128</option></select></div>
-                                            <div className="param-group"><span>增强轮数: {augRounds}</span><input type="range" min="1" max="10" step="1" value={augRounds} onChange={e => setAugRounds(e.target.value)} /></div>
+                                            <div className="param-group"><span>增强轮数: {augRounds}</span><input type="range" min="1" max="5" step="1" value={augRounds} onChange={e => setAugRounds(parseInt(e.target.value))} /></div>
                                             <button onClick={handleTrain} className="btn-primary" disabled={loading}>开始训练</button>
                                         </div>
                                     )}
@@ -306,13 +308,17 @@
                             ) : (
                                 <div className="card">
                                     <div className="step-header"><h2>我的模型库</h2></div>
-                                    <div className="model-grid">
+                                    <div className="model-list">
+                                        {models.length === 0 && <p style={{color: '#94a3b8'}}>尚未有训练完成的模型。</p>}
                                         {models.map(m => (
-                                            <div key={m.id} className="model-card">
-                                                <h3 style={{marginTop: 0}}>{m.wakeword}</h3>
+                                            <div key={m.id} className="model-row">
+                                                <div className="model-info">
+                                                    <h4>{m.wakeword}</h4>
+                                                    <p>ID: {m.id} | {m.params.num_samples} 样本 | {m.params.steps} 步</p>
+                                                </div>
                                                 <div style={{display: 'flex', gap: '0.5rem'}}>
                                                     <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981'}}>下载</button>
-                                                    <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm">实时测试</button>
+                                                    <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm">测试</button>
                                                 </div>
                                             </div>
                                         ))}
@@ -323,14 +329,10 @@
 
                         <div className="side-bar">
                             <div className="card" style={{padding: '1.5rem'}}>
-                                <h3>任务进度看板</h3>
+                                <h3>任务看板</h3>
                                 {sortedTasks.map(t => (
                                     <div key={t.id} className="task-item">
-                                        <div style={{display: 'flex', justifyContent: 'space-between'}}>
-                                            <strong>{t.wakeword}</strong>
-                                            <span className={`badge ${t.status}`}>{t.status === "Completed" ? "已完成" : t.status === "Running" ? "运行中" : t.status === "Failed" ? "失败" : "等待"}</span>
-                                        </div>
-                                        
+                                        <div style={{display: 'flex', justifyContent: 'space-between'}}><strong>{t.wakeword}</strong><span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span></div>
                                         <div className="pipeline-steps">
                                             <StepItem task={t} stepNum={1} label="生成正样本" />
                                             <StepItem task={t} stepNum={2} label="生成近似词样本" />
@@ -338,7 +340,6 @@
                                             <StepItem task={t} stepNum={4} label="增强与特征提取" />
                                             <StepItem task={t} stepNum={5} label="训练模型" />
                                         </div>
-                                        
                                         {t.status === "Failed" && <div style={{fontSize:'0.7rem', color:'var(--error)', marginTop:'8px'}}>错误: {t.sub_status}</div>}
                                     </div>
                                 ))}
