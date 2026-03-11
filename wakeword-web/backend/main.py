@@ -208,8 +208,15 @@ async def websocket_test_model(websocket: WebSocket, task_id: str):
                 if features.shape[1] >= model_window_size:
                     window = features[:, -model_window_size:, :]
                     outputs = session.run(None, {input_name: window})
-                    await websocket.send_json({"score": float(outputs[0][0][0])})
-                    audio_buffer = audio_buffer[-48000:]
+                    score = float(outputs[0][0][0])
+                    await websocket.send_json({"score": score})
+                    
+                    # 同步逻辑：如果检测到唤醒词 (得分 > 0.5)，清空缓冲区防止重复触发
+                    if score > 0.5:
+                        audio_buffer = np.array([], dtype=np.int16)
+                    else:
+                        # 否则保持 buffer 长度在合理范围
+                        audio_buffer = audio_buffer[-48000:]
     except WebSocketDisconnect: pass
     except Exception as e:
         try: await websocket.send_json({"error": str(e)})
