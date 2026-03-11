@@ -22,6 +22,10 @@
         .badge.Running { background: #dbeafe; color: #1e40af; }
         .badge.Failed { background: #fee2e2; color: #991b1b; }
         input, select { width: 100%; padding: 0.75rem; margin: 0.5rem 0 1.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        .param-group { margin-bottom: 1.5rem; }
+        .param-info { display: flex; justify-content: space-between; font-size: 0.9rem; color: #475569; margin-bottom: 0.5rem; }
+        input[type="range"] { height: 6px; -webkit-appearance: none; background: #e2e8f0; border-radius: 3px; outline: none; border: none; margin: 0.5rem 0; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--primary); border-radius: 50%; cursor: pointer; }
         button { width: 100%; padding: 0.75rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
@@ -59,6 +63,12 @@
             const [models, setModels] = useState([]);
             const [loading, setLoading] = useState(false);
             const [uiStep, setUiStep] = useState(1);
+
+            // 训练参数 (按 my_model.yaml 默认值)
+            const [numSamples, setNumSamples] = useState(500);
+            const [trainSteps, setSteps] = useState(1000);
+            const [layerSize, setLayerSize] = useState(32);
+            const [augRounds, setAugRounds] = useState(1);
 
             const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
 
@@ -157,7 +167,14 @@
                     const res = await fetch(`${API}/train`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword, similar_words: similarWords, num_samples: 2000, epochs: 50 })
+                        body: JSON.stringify({ 
+                            wakeword, 
+                            similar_words: similarWords, 
+                            num_samples: parseInt(numSamples),
+                            steps: parseInt(trainSteps),
+                            layer_size: parseInt(layerSize),
+                            aug_rounds: parseInt(augRounds)
+                        })
                     });
                     if (res.ok) {
                         alert("训练任务已开始！");
@@ -224,34 +241,18 @@
                                         <div>
                                             <div className="step-header"><h2>第二步：管理对抗样本 (近似词)</h2></div>
                                             <p>大模型已生成发音相似词汇。你可以删除或手动添加，用于降低误触发：</p>
-                                            
                                             <div className="add-tag-box">
-                                                <input 
-                                                    value={newWordInput} 
-                                                    onChange={e => setNewWordInput(e.target.value)} 
-                                                    onKeyDown={e => e.key === 'Enter' && handleAddWord()}
-                                                    placeholder="输入词语，多个用逗号分隔" 
-                                                    style={{margin: 0}}
-                                                />
+                                                <input value={newWordInput} onChange={e => setNewWordInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddWord()} placeholder="输入词语，多个用逗号分隔" style={{margin: 0}} />
                                                 <button onClick={handleAddWord} className="btn-primary" style={{width: '100px'}}>添加</button>
                                             </div>
-
                                             <div className="tag-list">
                                                 {similarWords.map((w, i) => (
-                                                    <span key={i} className="tag">
-                                                        {w}
-                                                        <span className="tag-remove" onClick={() => handleRemoveWord(i)}>×</span>
-                                                    </span>
+                                                    <span key={i} className="tag">{w}<span className="tag-remove" onClick={() => handleRemoveWord(i)}>×</span></span>
                                                 ))}
                                             </div>
-                                            
                                             <div style={{marginTop: '2rem'}}>
-                                                <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>
-                                                    确认这 {similarWords.length} 个词汇，继续下一步
-                                                </button>
-                                                <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>
-                                                    {loading ? "重新生成中..." : "让大模型再想一批"}
-                                                </button>
+                                                <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0}>确认这 {similarWords.length} 个词汇，继续下一步</button>
+                                                <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>{loading ? "重新生成中..." : "让大模型再想一批"}</button>
                                                 <button onClick={() => { setUiStep(1); setPreviews([]); }} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
                                             </div>
                                         </div>
@@ -259,17 +260,40 @@
 
                                     {uiStep === 3 && (
                                         <div>
-                                            <div className="step-header"><h2>第三步：最终训练配置</h2></div>
-                                            <p>唤醒词: <strong>{wakeword}</strong></p>
-                                            <p>干扰项数量: <strong>{similarWords.length}</strong> 个词汇</p>
-                                            <label>数据集规模 (合成样本数量): 2000</label>
-                                            <input type="range" disabled value="2000" />
-                                            <label>训练强度 (迭代轮数): 50</label>
-                                            <input type="range" disabled value="50" />
+                                            <div className="step-header"><h2>第三步：定制训练参数</h2></div>
+                                            
+                                            <div className="param-group">
+                                                <div className="param-info"><span>数据集规模 (正样本数)</span><strong>{numSamples}</strong></div>
+                                                <input type="range" min="100" max="5000" step="100" value={numSamples} onChange={e => setNumSamples(e.target.value)} />
+                                            </div>
+
+                                            <div className="param-group">
+                                                <div className="param-info"><span>训练迭代步数 (Steps)</span><strong>{trainSteps}</strong></div>
+                                                <input type="range" min="500" max="10000" step="100" value={trainSteps} onChange={e => setSteps(e.target.value)} />
+                                            </div>
+
+                                            <div className="param-group">
+                                                <div className="param-info"><span>模型层大小 (Layer Size)</span><strong>{layerSize}</strong></div>
+                                                <select value={layerSize} onChange={e => setLayerSize(e.target.value)}>
+                                                    <option value="32">32 (轻量，响应快)</option>
+                                                    <option value="64">64 (标准)</option>
+                                                    <option value="128">128 (高性能，抗噪强)</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="param-group">
+                                                <div className="param-info"><span>数据增强轮数 (Aug Rounds)</span><strong>{augRounds}</strong></div>
+                                                <input type="range" min="1" max="10" step="1" value={augRounds} onChange={e => setAugRounds(e.target.value)} />
+                                            </div>
+
+                                            <div style={{background: '#f8fafc', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.85rem', color: '#64748b'}}>
+                                                💡 系统将根据以上参数动态计算验证集比例、负样本权重和正样本 Batch 大小。
+                                            </div>
+
                                             <button onClick={handleTrain} className="btn-primary" disabled={loading}>
-                                                {loading ? "任务准备中..." : "开始完整流水线 (约需 5-10 分钟)"}
+                                                {loading ? "任务准备中..." : "开始完整流水线"}
                                             </button>
-                                            <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
+                                            <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>返回修改近似词</button>
                                         </div>
                                     )}
                                 </div>
@@ -283,7 +307,7 @@
                                                 <h3 style={{marginTop: 0}}>{m.wakeword}</h3>
                                                 <div style={{fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem'}}>
                                                     <div>任务 ID: {m.id}</div>
-                                                    <div>参数: {m.params.num_samples} 样本 / {m.params.epochs} 轮</div>
+                                                    <div>配置: {m.params.num_samples} 样本 / {m.params.steps} 步 / {m.params.layer_size} 层</div>
                                                 </div>
                                                 <button onClick={() => window.open(m.download_url)} className="btn-primary" style={{background: '#10b981'}}>下载 .onnx 模型</button>
                                             </div>
