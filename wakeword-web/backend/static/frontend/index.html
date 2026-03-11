@@ -29,6 +29,8 @@
         .progress-bar { height: 6px; background: #e2e8f0; border-radius: 3px; margin-top: 0.5rem; overflow: hidden; }
         .progress-fill { height: 100%; background: var(--primary); transition: width 0.5s; }
         .status-text { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+        .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+        .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
     </style>
 </head>
 <body>
@@ -40,11 +42,11 @@
             const [user, setUser] = useState(null);
             const [token, setToken] = useState(localStorage.getItem('token'));
             const [wakeword, setWakeword] = useState("");
-            const [speaker, setSpeaker] = useState("vivian");
             const [previews, setPreviews] = useState([]);
+            const [similarWords, setSimilarWords] = useState([]);
             const [tasks, setTasks] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [uiStep, setUiStep] = useState(1);
+            const [uiStep, setUiStep] = useState(1); // 1: Preview, 2: Similars, 3: Train
 
             const getApiBase = () => {
                 const path = window.location.pathname;
@@ -75,20 +77,14 @@
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const urlToken = params.get('token');
-                
-                // 1. 如果 URL 有 Token，优先使用
                 if (urlToken) {
                     window.history.replaceState({}, "", window.location.pathname);
                     fetchUser(urlToken);
                     fetchTasks(urlToken);
-                } 
-                // 2. 如果本地有持久化 Token，使用之
-                else if (token) {
+                } else if (token) {
                     fetchUser(token);
                     fetchTasks(token);
-                }
-                // 3. 否则，默认尝试本地开发模式登录 (跳过登录)
-                else {
+                } else {
                     fetchUser('local-dev-mode'); 
                 }
             }, []);
@@ -100,11 +96,7 @@
                 return () => clearInterval(timer);
             }, [token, fetchTasks]);
 
-            const logout = () => {
-                setUser(null);
-                setToken(null);
-                localStorage.removeItem('token');
-            };
+            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
 
             const handlePreview = async () => {
                 if (!wakeword) return;
@@ -113,13 +105,26 @@
                     const res = await fetch(`${API}/preview`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword, speaker })
+                        body: JSON.stringify({ wakeword })
                     });
                     const data = await res.json();
                     setPreviews(data.urls || []);
-                } catch (e) {
-                    alert("预览生成失败，请检查后端日志");
-                }
+                } catch (e) { alert("预览生成失败"); }
+                setLoading(false);
+            };
+
+            const handleGetSimilars = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API}/generate-similar-words`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ wakeword })
+                    });
+                    const data = await res.json();
+                    setSimilarWords(data.similar_words || []);
+                    setUiStep(2);
+                } catch (e) { alert("生成近似词失败"); }
                 setLoading(false);
             };
 
@@ -129,16 +134,14 @@
                     const res = await fetch(`${API}/train`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ wakeword, num_samples: 2000, epochs: 50 })
+                        body: JSON.stringify({ wakeword, similar_words: similarWords, num_samples: 2000, epochs: 50 })
                     });
                     if (res.ok) {
-                        alert("训练任务已提交！");
-                        setUiStep(1); setWakeword(""); setPreviews([]);
+                        alert("训练任务已开始！");
+                        setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]);
                         fetchTasks(token);
                     }
-                } catch (e) {
-                    alert("提交失败");
-                }
+                } catch (e) { alert("提交失败"); }
                 setLoading(false);
             };
 
@@ -167,42 +170,59 @@
 
                     <div className="layout">
                         <div className="card">
-                            {uiStep === 1 ? (
+                            {uiStep === 1 && (
                                 <div>
-                                    <div className="step-header"><h2>第一步：预览样本</h2></div>
+                                    <div className="step-header"><h2>第一步：生成预览样本</h2></div>
                                     <label>自定义唤醒词</label>
                                     <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="例如：小熊" />
                                     <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>
-                                        {loading ? "生成中..." : "生成预览样本"}
+                                        {loading ? "正在由 Qwen3-TTS 生成..." : "生成预览样本"}
                                     </button>
-
                                     {previews.length > 0 && (
                                         <div className="audio-preview">
                                             {previews.map((url, i) => (
                                                 <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>
                                             ))}
-                                            <button onClick={() => setUiStep(2)} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}}>效果不错，下一步</button>
+                                            <button onClick={handleGetSimilars} className="btn-primary" style={{background: '#10b981', marginTop: '1rem'}} disabled={loading}>
+                                                {loading ? "Qwen3.5-Plus 思考中..." : "效果不错，下一步"}
+                                            </button>
                                         </div>
                                     )}
                                 </div>
-                            ) : (
+                            )}
+
+                            {uiStep === 2 && (
                                 <div>
-                                    <div className="step-header"><h2>第二步：训练配置</h2></div>
-                                    <p>选定词汇: <strong>{wakeword}</strong></p>
-                                    <label>数据集大小: 2000 个样本</label>
-                                    <input type="range" disabled />
-                                    <label>训练强度: 50 轮 (Epochs)</label>
-                                    <input type="range" disabled />
+                                    <div className="step-header"><h2>第二步：生成对抗样本 (近似词)</h2></div>
+                                    <p>大模型已为您生成发音相似的词汇，用于降低误触发：</p>
+                                    <div className="tag-list">
+                                        {similarWords.map((w, i) => <span key={i} className="tag">{w}</span>)}
+                                    </div>
+                                    <button onClick={() => setUiStep(3)} className="btn-primary">确认词汇，继续下一步</button>
+                                    <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>重新生成</button>
+                                    <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '0.5rem'}}>返回修改唤醒词</button>
+                                </div>
+                            )}
+
+                            {uiStep === 3 && (
+                                <div>
+                                    <div className="step-header"><h2>第三步：最终训练配置</h2></div>
+                                    <p>唤醒词: <strong>{wakeword}</strong></p>
+                                    <p>干扰项数量: <strong>{similarWords.length}</strong> 个词汇</p>
+                                    <label>数据集规模 (合成样本数量): 2000</label>
+                                    <input type="range" disabled value="2000" />
+                                    <label>训练强度 (迭代轮数): 50</label>
+                                    <input type="range" disabled value="50" />
                                     <button onClick={handleTrain} className="btn-primary" disabled={loading}>
-                                        {loading ? "提交中..." : "开始完整流水线"}
+                                        {loading ? "任务准备中..." : "开始完整流水线 (约需 5-10 分钟)"}
                                     </button>
-                                    <button onClick={() => setUiStep(1)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
+                                    <button onClick={() => setUiStep(2)} className="btn-outline" style={{marginTop: '1rem'}}>返回</button>
                                 </div>
                             )}
                         </div>
 
                         <div className="card" style={{padding: '1.5rem'}}>
-                            <h3>最近任务</h3>
+                            <h3>任务进度看板</h3>
                             {tasks.length === 0 && <p style={{color: '#94a3b8'}}>暂无训练记录。</p>}
                             {tasks.map(t => (
                                 <div key={t.id} className="task-item">
@@ -219,7 +239,6 @@
                                     </div>
                                 </div>
                             ))}
-                            <button onClick={() => fetchTasks(token)} className="btn-outline" style={{marginTop: '1rem', padding: '0.5rem'}}>手动刷新历史</button>
                         </div>
                     </div>
                 </div>
