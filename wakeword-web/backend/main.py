@@ -24,7 +24,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import jwt
 
-# 尝试导入推理库，如果后端环境没有，则在启动时提醒
+# 尝试导入推理库
 try:
     import onnxruntime as ort
     import openwakeword
@@ -180,51 +180,42 @@ def run_v2_pipeline(task_id, resume_from_step=1):
 async def websocket_test_model(websocket: WebSocket, task_id: str):
     await websocket.accept()
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(backend_dir, f"static/datasets/{task_id}/beary_custom.onnx")
+    root_dir = os.path.dirname(os.path.dirname(backend_dir))
+    
+    if task_id == "built-in-beary":
+        model_path = os.path.join(root_dir, "beary.onnx")
+    else:
+        model_path = os.path.join(backend_dir, f"static/datasets/{task_id}/beary_custom.onnx")
     
     if not os.path.exists(model_path) or not HAS_INFERENCE_LIBS:
-        await websocket.send_json({"error": "模型不存在或后端环境缺少推理库"})
-        await websocket.close()
-        return
+        await websocket.send_json({"error": "模型文件未找到或推理库未加载"})
+        await websocket.close(); return
 
     try:
-        # 初始化推理引擎
         session = ort.InferenceSession(model_path)
         input_name = session.get_inputs()[0].name
         model_window_size = session.get_inputs()[0].shape[1]
         F = AudioFeatures()
-        
         audio_buffer = np.array([], dtype=np.int16)
         
         while True:
-            # 接收二进制音频块 (期望是 16kHz, 16bit PCM)
             data = await websocket.receive_bytes()
             chunk = np.frombuffer(data, dtype=np.int16)
             audio_buffer = np.append(audio_buffer, chunk)
-            
-            # 当 buffer 足够长时（至少 1280 样本，约 80ms），进行一次特征提取
             if len(audio_buffer) >= 1280:
                 audio_batch = audio_buffer.reshape(1, -1)
                 features = F.embed_clips(audio_batch)
-                n_embeddings = features.shape[1]
-                
-                if n_embeddings >= model_window_size:
-                    # 取最后一窗进行推理
+                if features.shape[1] >= model_window_size:
                     window = features[:, -model_window_size:, :]
                     outputs = session.run(None, {input_name: window})
-                    score = float(outputs[0][0][0])
-                    await websocket.send_json({"score": score})
-                    # 保持 buffer 长度在合理范围（约 3 秒）
+                    await websocket.send_json({"score": float(outputs[0][0][0])})
                     audio_buffer = audio_buffer[-48000:]
-                
-    except WebSocketDisconnect:
-        print(f"WebSocket disconnected for task {task_id}")
+    except WebSocketDisconnect: pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
         try: await websocket.send_json({"error": str(e)})
         except: pass
 
-# --- 常用路由 ---
+# --- 路由 ---
 @app.get("/")
 async def read_root(): return RedirectResponse(url="/site/static/frontend/index.html")
 
@@ -267,7 +258,9 @@ async def start_training(req: TrainRequest, bt: BackgroundTasks, u=Depends(get_c
 @app.get("/api/models")
 async def list_models(user=Depends(get_current_user), db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").all()
-    return [{"id":t.id, "wakeword":t.wakeword, "params":t.params, "download_url":f"/site/static/datasets/{t.id}/beary_custom.onnx"} for t in tasks]
+    user_models = [{"id":t.id, "wakeword":t.wakeword, "params":t.params, "download_url":f"/site/static/datasets/{t.id}/beary_custom.onnx", "is_built_in": False} for t in tasks]
+    built_in = [{"id": "built-in-beary", "wakeword": "小熊 (内置)", "params": {"num_samples": "N/A", "steps": "N/A", "layer_size": "Standard"}, "download_url": "/site/static/beary.onnx", "is_built_in": True}]
+    return built_in + user_models
 
 if __name__ == "__main__":
     import uvicorn
