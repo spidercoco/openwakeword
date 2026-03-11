@@ -29,8 +29,13 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
-        .btn-retry { width: 22px; height: 22px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; font-size: 1rem; }
-        .btn-retry:hover { border-color: var(--primary); color: var(--primary); background: #eff6ff; transform: rotate(90deg); }
+        
+        /* 极简圆形按钮样式 */
+        .icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all 0.2s; }
+        .icon-btn:hover { border-color: var(--primary); color: var(--primary); background: #f0f7ff; }
+        .icon-btn svg { width: 16px; height: 16px; }
+        .icon-btn.success:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+
         .task-item { padding: 1.5rem 0; border-bottom: 1px solid #f1f5f9; }
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
         .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.5rem 0; color: #64748b; }
@@ -42,7 +47,7 @@
         .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
         .tag { background: #eff6ff; color: #1d4ed8; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.9rem; }
         .model-list { display: flex; flex-direction: column; }
-        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid #f1f5f9; }
+        .model-row { display: flex; justify-content: space-between; align-items: center; padding: 1.2rem 0; border-bottom: 1px solid #f1f5f9; }
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal-content { background: white; padding: 2rem; border-radius: 12px; max-width: 500px; width: 90%; text-align: center; }
         .score-display { width: 120px; height: 120px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; position: relative; }
@@ -56,6 +61,65 @@
         const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
         const API = window.location.pathname.startsWith('/site') ? '/site/api' : '/api';
+
+        // 简约图标组件
+        const IconDownload = () => (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+        );
+
+        const IconMic = () => (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+        );
+
+        const IconRetry = () => (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 19 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+        );
+
+        const StepItem = ({ task, stepNum, label, onRetry }) => {
+            const isCurrent = task.current_step === stepNum && task.status === "Running";
+            const isDone = task.current_step > stepNum || task.status === "Completed";
+            const isFailed = task.current_step === stepNum && task.status === "Failed";
+            let statusIcon = "⚪"; let className = "pipeline-step";
+            if (isDone) { statusIcon = "✅"; className += " done"; }
+            else if (isCurrent) { statusIcon = "⏳"; className += " active"; }
+            else if (isFailed) { statusIcon = "❌"; className += " fail"; }
+
+            const match = isCurrent && task.sub_status ? task.sub_status.match(/\((.*?)\)/) : null;
+            const progressText = match ? match[1] : null;
+
+            return (
+                <div className={className}>
+                    <div style={{flex: 1}}>
+                        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                            <span>{statusIcon} {label}</span>
+                            {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
+                        </div>
+                        {progressText && (
+                            <div style={{fontSize: '0.75rem', color: '#2563eb', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
+                                数量: {progressText}
+                            </div>
+                        )}
+                    </div>
+                    {(task.status !== 'Running') && (
+                        <div className="icon-btn" title="从该步重试" onClick={() => onRetry(task.id, stepNum)} style={{width:24, height:24}}>
+                            <IconRetry />
+                        </div>
+                    )}
+                </div>
+            );
+        };
 
         const App = () => {
             const [user, setUser] = useState(null);
@@ -95,27 +159,27 @@
                 });
             }, [tasks]);
 
-            const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
+            const logout = useCallback(() => { setUser(null); setToken(null); localStorage.removeItem('token'); }, []);
 
             const fetchUser = useCallback((t) => {
                 fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : Promise.reject())
                 .then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
                 .catch(() => logout());
-            }, []);
+            }, [logout]);
 
             const fetchTasks = useCallback((t) => {
                 if (!t) return;
                 fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
-                .then(data => setTasks(data));
+                .then(setTasks);
             }, []);
 
             const fetchModels = useCallback((t) => {
                 if (!t) return;
                 fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }})
                 .then(r => r.ok ? r.json() : [])
-                .then(data => setModels(data));
+                .then(setModels);
             }, []);
 
             useEffect(() => {
@@ -125,7 +189,7 @@
                     if (params.get('token')) window.history.replaceState({}, "", window.location.pathname);
                     fetchUser(urlToken); fetchTasks(urlToken);
                 } else { fetchUser('local-dev-mode'); }
-            }, []);
+            }, [fetchUser, fetchTasks, token]);
 
             useEffect(() => {
                 const timer = setInterval(() => {
@@ -137,12 +201,12 @@
                 return () => clearInterval(timer);
             }, [token, activeTab, fetchTasks, fetchModels]);
 
-            const handleRetry = async (taskId, step) => {
+            const handleRetry = useCallback(async (taskId, step) => {
                 const res = await fetch(`${API}/retry/${taskId}?step=${step}`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (res.ok) fetchTasks(token);
-            };
+            }, [token, fetchTasks]);
 
             const startLiveTest = async (model) => {
                 setTestingModel(model); setTestModalOpen(true); setHitCount(0); setCurrentScore(0);
@@ -163,20 +227,33 @@
                     processorRef.current = audioCtxRef.current.createScriptProcessor(4096, 1, 1);
                     processorRef.current.onaudioprocess = (e) => {
                         if (wsRef.current?.readyState === WebSocket.OPEN) {
-                            const inputData = e.inputBuffer.getChannelData(0);
-                            const pcmData = new Int16Array(inputData.length);
-                            for (let i = 0; i < inputData.length; i++) pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                            const pcmData = new Int16Array(e.inputBuffer.getChannelData(0).length);
+                            for (let i = 0; i < pcmData.length; i++) pcmData[i] = Math.max(-1, Math.min(1, e.inputBuffer.getChannelData(0)[i])) * 0x7FFF;
                             wsRef.current.send(pcmData.buffer);
                         }
                     };
                     source.connect(processorRef.current);
                     processorRef.current.connect(audioCtxRef.current.destination);
-                } catch (err) { alert("麦克风启动失败"); stopLiveTest(); }
+                } catch (err) { alert("麦克风失败"); stopLiveTest(); }
             };
 
             const stopLiveTest = () => {
                 wsRef.current?.close(); processorRef.current?.disconnect(); audioCtxRef.current?.close();
                 setTestModalOpen(false); setTestingModel(null);
+            };
+
+            const handlePreview = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API}/preview`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ wakeword })
+                    });
+                    const data = await res.json();
+                    setPreviews(data.urls || []);
+                } catch (e) { alert("预览失败"); }
+                setLoading(false);
             };
 
             const handleGetSimilars = async () => {
@@ -210,39 +287,6 @@
                 setLoading(false);
             };
 
-            // 内部 StepItem 组件定义，确保闭包正确
-            const StepItem = ({ task, stepNum, label }) => {
-                const isCurrent = task.current_step === stepNum && task.status === "Running";
-                const isDone = task.current_step > stepNum || task.status === "Completed";
-                const isFailed = task.current_step === stepNum && task.status === "Failed";
-                let statusIcon = "⚪"; let className = "pipeline-step";
-                if (isDone) { statusIcon = "✅"; className += " done"; }
-                else if (isCurrent) { statusIcon = "⏳"; className += " active"; }
-                else if (isFailed) { statusIcon = "❌"; className += " fail"; }
-
-                const match = isCurrent && task.sub_status ? task.sub_status.match(/\((.*?)\)/) : null;
-                const progressText = match ? match[1] : null;
-
-                return (
-                    <div className={className}>
-                        <div style={{flex: 1}}>
-                            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                                <span>{statusIcon} {label}</span>
-                                {isCurrent && <div className="progress-mini"><div className="progress-mini-fill" style={{width: `${task.progress}%`}}></div></div>}
-                            </div>
-                            {progressText && (
-                                <div style={{fontSize: '0.75rem', color: '#2563eb', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>
-                                    数量: {progressText}
-                                </div>
-                            )}
-                        </div>
-                        {(task.status !== 'Running') && (
-                            <div className="btn-retry" title="从该步重试" onClick={() => handleRetry(task.id, stepNum)}>↻</div>
-                        )}
-                    </div>
-                );
-            };
-
             const getStatusLabel = (s) => {
                 const map = { 'Running': '运行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待' };
                 return map[s] || s;
@@ -273,19 +317,7 @@
                                         <div>
                                             <div className="step-header"><h2>第一步：生成预览样本</h2></div>
                                             <input value={wakeword} onChange={e => setWakeword(e.target.value)} placeholder="输入唤醒词，例如：小熊" />
-                                            <button onClick={async () => {
-                                                setLoading(true);
-                                                try {
-                                                    const res = await fetch(`${API}/preview`, {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                                        body: JSON.stringify({ wakeword })
-                                                    });
-                                                    const data = await res.json();
-                                                    setPreviews(data.urls || []);
-                                                } catch (e) { alert("预览失败"); }
-                                                setLoading(false);
-                                            }} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
+                                            <button onClick={handlePreview} className="btn-primary" disabled={!wakeword || loading}>{loading && !previews.length ? "正在合成音频..." : "生成预览样本"}</button>
                                             {previews.length > 0 && (
                                                 <div className="audio-preview">
                                                     {previews.map((url, i) => <div key={i}><audio controls src={url} style={{width: '100%'}} /></div>)}
@@ -326,15 +358,17 @@
                                     <div className="model-list">
                                         {models.length === 0 && <p style={{color: '#94a3b8'}}>尚未有训练完成的模型。</p>}
                                         {models.map(m => (
-                                            <div key={m.id} className="model-row" style={{flexDirection: 'column', alignItems: 'flex-start'}}>
-                                                <h4 style={{margin: '0 0 0.5rem 0'}}>{m.wakeword}</h4>
-                                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%'}}>
-                                                    <p style={{margin: 0, fontSize: '0.8rem', color: '#64748b'}}>
-                                                        ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步
-                                                    </p>
-                                                    <div style={{display: 'flex', gap: '0.5rem'}}>
-                                                        <button onClick={() => window.open(m.download_url)} className="btn-primary btn-sm" style={{background: '#10b981', padding: '0.2rem 0.5rem'}}>下载</button>
-                                                        <button onClick={() => startLiveTest(m)} className="btn-outline btn-sm" style={{padding: '0.2rem 0.5rem'}}>测试</button>
+                                            <div key={m.id} className="model-row">
+                                                <div className="model-info">
+                                                    <h4>{m.wakeword}</h4>
+                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本 | {m.params?.steps?.toLocaleString() || 'N/A'} 步</p>
+                                                </div>
+                                                <div style={{display: 'flex', gap: '0.8rem'}}>
+                                                    <div className="icon-btn success" onClick={() => window.open(m.download_url)} title="下载模型">
+                                                        <IconDownload />
+                                                    </div>
+                                                    <div className="icon-btn" onClick={() => startLiveTest(m)} title="实时测试">
+                                                        <IconMic />
                                                     </div>
                                                 </div>
                                             </div>
@@ -351,11 +385,11 @@
                                     <div key={t.id} className="task-item">
                                         <div style={{display: 'flex', justifyContent: 'space-between'}}><strong>{t.wakeword}</strong><span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span></div>
                                         <div className="pipeline-steps">
-                                            <StepItem task={t} stepNum={1} label="生成正样本" />
-                                            <StepItem task={t} stepNum={2} label="生成近似词样本" />
-                                            <StepItem task={t} stepNum={3} label="重采样音频" />
-                                            <StepItem task={t} stepNum={4} label="增强与特征提取" />
-                                            <StepItem task={t} stepNum={5} label="训练模型" />
+                                            <StepItem task={t} stepNum={1} label="生成正样本" onRetry={handleRetry} />
+                                            <StepItem task={t} stepNum={2} label="生成近似词样本" onRetry={handleRetry} />
+                                            <StepItem task={t} stepNum={3} label="重采样音频" onRetry={handleRetry} />
+                                            <StepItem task={t} stepNum={4} label="增强与特征提取" onRetry={handleRetry} />
+                                            <StepItem task={t} stepNum={5} label="训练模型" onRetry={handleRetry} />
                                         </div>
                                         {t.status === "Failed" && <div style={{fontSize:'0.7rem', color:'var(--error)', marginTop:'8px'}}>错误: {t.sub_status}</div>}
                                     </div>
@@ -371,7 +405,7 @@
                                 <p><span className="mic-indicator"></span> 麦克风已开启</p>
                                 <div style={{fontSize:'1.2rem', fontWeight:'bold', color:'var(--success)'}}>命中次数: {hitCount}</div>
                                 <div className={`score-display ${isDetected ? 'detected' : ''}`}>
-                                    <span style={{fontSize:'2.5rem', fontWeight:800}}>{(currentScore * 100).toFixed(0)}%</span>
+                                    <span style={{fontSize:'2rem', fontWeight:800}}>{(currentScore * 100).toFixed(0)}%</span>
                                     <span style={{fontSize:'0.8rem', color:'#64748b'}}>置信度</span>
                                 </div>
                                 <button onClick={stopLiveTest} className="btn-primary" style={{background: '#ef4444'}}>停止测试</button>
