@@ -93,11 +93,5 @@ def main():
 
     print(f"Success. Generated {count} samples in {args.output_dir}")
 
-        except Exception as e:
-            print(f"Generation error: {e}")
-            continue
-
-    print(f"Success. Generated {count} samples in {args.output_dir}")
-
 if __name__ == "__main__":
     main()
