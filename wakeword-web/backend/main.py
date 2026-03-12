@@ -164,25 +164,30 @@ def run_cmd_v2(cmd, task_id, step_num, total_steps, start_progress, end_progress
     
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
     
-    # 后台持续监控文件数量
-    while process.poll() is None:
-        current_count = 0
-        if track_dir and os.path.exists(track_dir):
-            current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
-        
-        if target_total > 0:
-            # 计算该步骤内的百分比 (0-100)
-            step_percent = int((min(current_count, target_total) / target_total) * 100)
-            db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u:
-                # 数据库存储该步骤内的进度
-                t_u.progress = step_percent
-                t_u.sub_status = f"{sub_status_msg} ({current_count}/{target_total})"
-                db_u.commit()
-            db_u.close()
-        
-        import time
-        time.sleep(1) # 每秒检查一次文件数
+    try:
+        # 后台持续监控文件数量，增加对进程存活的严谨判断
+        while True:
+            current_count = 0
+            if track_dir and os.path.exists(track_dir):
+                current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
+            
+            if target_total > 0:
+                step_percent = int((min(current_count, target_total) / target_total) * 100)
+                db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
+                if t_u:
+                    t_u.progress = step_percent
+                    t_u.sub_status = f"{sub_status_msg} ({current_count}/{target_total})"
+                    db_u.commit()
+                db_u.close()
+            
+            # 检查进程是否已结束
+            if process.poll() is not None:
+                break
+                
+            import time
+            time.sleep(1)
+    except Exception as e:
+        print(f"Monitor error: {e}")
 
     process.wait()
     if process.returncode != 0: raise Exception(f"Failed at stage {step_num}")
