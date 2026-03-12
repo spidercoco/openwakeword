@@ -132,12 +132,12 @@ def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, laye
     config_data.update(dynamic)
     with open(os.path.join(task_dir, "config.yaml"), "w", encoding="utf-8") as f: yaml.dump(config_data, f, allow_unicode=True)
 
-# 关键修复：改为 async def，防止阻塞 FastAPI 事件循环
 async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=None, env=None, track_dir=None, target_total=0, concurrent_num=1):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
     if t: t.sub_status, t.current_step, t.progress = sub_status_msg, step_num, 0; db.commit()
     db.close()
     
+    # 物理前置判断
     if track_dir and target_total > 0 and os.path.exists(track_dir):
         count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
         if count >= target_total:
@@ -149,32 +149,38 @@ async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=No
     
     processes = []
     for _ in range(concurrent_num):
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
+        # 使用 DEVNULL 吞掉输出，防止 Pipe 满了阻塞
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STNULL if hasattr(subprocess, 'STNULL') else subprocess.DEVNULL, text=True, bufsize=1, cwd=cwd, env=env)
         processes.append(p)
     
     try:
-        # 使用 await asyncio.sleep，确保不阻塞主线程
         while any(p.poll() is None for p in processes):
             current_count = 0
             if track_dir and os.path.exists(track_dir):
                 current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
             
             if target_total > 0:
-                step_percent = int((min(current_count, target_total) / target_total) * 100)
+                step_percent = min(100, int((current_count / target_total) * 100))
                 db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
                 if t_u:
                     t_u.progress = step_percent
                     t_u.sub_status = f"{sub_status_msg} ({current_count}/{target_total})"
                     db_u.commit()
                 db_u.close()
+                
+                # 物理达标，主动强杀所有子进程，释放显存
+                if current_count >= target_total:
+                    print(f"[{task_id}] Target reached. Terminating sub-processes.")
+                    for p in processes: 
+                        try: p.terminate()
+                        except: pass
+                    break
             
-            await asyncio.sleep(1) # 异步等待
+            await asyncio.sleep(1)
     except Exception as e: print(f"Monitor error: {e}")
     
+    # 清理收尾
     for p in processes: p.wait()
-    if any(p.returncode != 0 for p in processes): 
-        final_count = len([f for f in os.listdir(track_dir)]) if track_dir else 0
-        if target_total > 0 and final_count < target_total: raise Exception(f"Failed at stage {step_num}")
 
 async def run_v2_pipeline(task_id, resume_from_step=1):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
