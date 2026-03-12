@@ -99,7 +99,12 @@ def generate_samples(similar_words, max_samples, output_dir, batch_size=1, model
                 if len(audio_final) / sr < 0.3: continue
                 
                 fname = f"sim_{uuid.uuid4().hex[:10]}.wav"
-                sf.write(os.path.join(output_dir, fname), audio_final, sr)
+                tmp_fname = fname + ".tmp"
+                tmp_path = os.path.join(output_dir, tmp_fname)
+                final_path = os.path.join(output_dir, fname)
+                
+                sf.write(tmp_path, audio_final, sr)
+                os.rename(tmp_path, final_path) # 原子重命名
         except Exception as e:
             print(f"Error: {e}")
             continue

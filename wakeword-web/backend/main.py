@@ -137,6 +137,15 @@ async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=No
     if t: t.sub_status, t.current_step, t.progress = sub_status_msg, step_num, 0; db.commit()
     db.close()
     
+    # 清理逻辑：删除残留的 .tmp 文件
+    if track_dir and os.path.exists(track_dir):
+        tmp_files = [f for f in os.listdir(track_dir) if f.endswith(".tmp")]
+        if tmp_files:
+            print(f"[{task_id}] Cleaning {len(tmp_files)} stale .tmp files in {track_dir}")
+            for f in tmp_files:
+                try: os.remove(os.path.join(track_dir, f))
+                except: pass
+
     # 物理前置判断
     if track_dir and target_total > 0 and os.path.exists(track_dir):
         count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
@@ -203,7 +212,10 @@ async def run_v2_pipeline(task_id, resume_from_step=1):
                 if step_idx == 1: await run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos, concurrent_num=concurrent)
                 else: await run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg, concurrent_num=concurrent)
 
-        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env)
+        if resume_from_step <= 3: 
+            # 监控重采样后的正样本训练集目录
+            resample_track_dir = os.path.join(task_dir, "positive_train_tts_16k")
+            await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env, track_dir=resample_track_dir, target_total=n_pos)
         if resume_from_step <= 4: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, "样本增强与特征提取", scripts_dir, env)
         if resume_from_step <= 5: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, "训练模型", scripts_dir, env)
         
