@@ -46,20 +46,15 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     github_id = Column(String, unique=True, index=True)
-    username = Column(String)
-    avatar_url = Column(String)
+    username = Column(String); avatar_url = Column(String)
 
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(String, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    wakeword = Column(String)
-    status = Column(String)
-    sub_status = Column(String)
-    current_step = Column(Integer, default=1)
-    progress = Column(Integer, default=0)
-    params = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    wakeword = Column(String); status = Column(String); sub_status = Column(String)
+    current_step = Column(Integer, default=1); progress = Column(Integer, default=0)
+    params = Column(JSON); created_at = Column(DateTime, default=datetime.utcnow)
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -76,8 +71,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
         try:
-            if token == 'local-dev-mode':
-                user = db.query(User).filter(User.username == "LocalDev").first()
+            if token == 'local-dev-mode': user = db.query(User).filter(User.username == "LocalDev").first()
             else:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
                 user = db.query(User).filter(User.id == payload.get("user_id")).first()
@@ -91,7 +85,6 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
 
 class TrainRequest(BaseModel):
     wakeword: str; similar_words: List[str]; num_samples: int; steps: int; layer_size: int; aug_rounds: int
-
 class PreviewRequest(BaseModel): wakeword: str
 class SimilarWordsRequest(BaseModel): wakeword: str
 
@@ -105,41 +98,27 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- 显存检测逻辑 ---
 def get_free_vram_gb():
-    """获取剩余显存 (GB)"""
     try:
         if torch.cuda.is_available():
-            # 获取当前卡 (默认 0) 的剩余显存
             t = torch.cuda.get_device_properties(0).total_memory
-            r = torch.cuda.memory_reserved(0)
-            a = torch.cuda.memory_allocated(0)
-            f = t - (r + a)
-            return f / 1024**3
-        elif torch.backends.mps.is_available():
-            # macOS MPS 显存通常与系统内存共享，返回一个保守值
-            return 16.0 
+            r = torch.cuda.memory_reserved(0); a = torch.cuda.memory_allocated(0)
+            return (t - (r + a)) / 1024**3
+        if torch.backends.mps.is_available(): return 16.0 
     except: pass
     return 0.0
 
-async def wait_for_vram(task_id, min_gb=8.0):
-    """等待显存释放"""
+async def wait_for_vram(task_id, min_gb=6.0):
     while True:
-        free_gb = get_free_vram_gb()
-        if free_gb >= min_gb:
-            return free_gb
-        
+        f = get_free_vram_gb()
+        if f >= min_gb: return f
         db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
-        if t:
-            t.sub_status = f"显存不足(剩余 {free_gb:.1f}G), 正在排队等待..."
-            db.commit()
-        db.close()
-        await asyncio.sleep(5)
+        if t: t.sub_status = f"显存不足(剩余 {f:.1f}G), 正在等待..."; db.commit()
+        db.close(); await asyncio.sleep(5)
 
 # --- 业务逻辑 ---
 def get_dynamic_config(n_samples, steps, layer_size, aug_rounds):
-    val_samples = max(20, int(n_samples * 0.2))
-    pos_batch = 50 if n_samples > 100 else 16
-    neg_weight = 1500 if layer_size >= 64 else 800
-    acc = 0.6 if steps >= 1000 else 0.5
+    val_samples = max(20, int(n_samples * 0.2)); pos_batch = 50 if n_samples > 100 else 16
+    neg_weight = 1500 if layer_size >= 64 else 800; acc = 0.6 if steps >= 1000 else 0.5
     return {"n_samples": n_samples, "n_samples_val": val_samples, "steps": steps, "layer_size": layer_size, "augmentation_rounds": aug_rounds, "batch_n_per_class": {"positive": pos_batch, "adversarial_negative": 50, "ACAV100M_sample": 128}, "max_negative_weight": neg_weight, "target_accuracy": acc}
 
 def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, layer_size, aug_rounds):
@@ -153,12 +132,12 @@ def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, laye
     config_data.update(dynamic)
     with open(os.path.join(task_dir, "config.yaml"), "w", encoding="utf-8") as f: yaml.dump(config_data, f, allow_unicode=True)
 
-def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=None, env=None, track_dir=None, target_total=0, concurrent_num=1):
+# 关键修复：改为 async def，防止阻塞 FastAPI 事件循环
+async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=None, env=None, track_dir=None, target_total=0, concurrent_num=1):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
     if t: t.sub_status, t.current_step, t.progress = sub_status_msg, step_num, 0; db.commit()
     db.close()
     
-    # 物理判断
     if track_dir and target_total > 0 and os.path.exists(track_dir):
         count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
         if count >= target_total:
@@ -166,15 +145,15 @@ def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=None, en
             if t_u: t_u.progress, t_u.sub_status = 100, f"{sub_status_msg} ({count}/{target_total})"; db_u.commit()
             db_u.close(); return
 
-    print(f"\n" + "="*60 + f"\n🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})\n💻 Command: {' '.join(cmd)}\n" + "="*60 + "\n")
+    print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
     
-    # 启动多个子进程
     processes = []
     for _ in range(concurrent_num):
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd, env=env)
         processes.append(p)
     
     try:
+        # 使用 await asyncio.sleep，确保不阻塞主线程
         while any(p.poll() is None for p in processes):
             current_count = 0
             if track_dir and os.path.exists(track_dir):
@@ -189,15 +168,13 @@ def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=None, en
                     db_u.commit()
                 db_u.close()
             
-            import time; time.sleep(1)
+            await asyncio.sleep(1) # 异步等待
     except Exception as e: print(f"Monitor error: {e}")
     
     for p in processes: p.wait()
     if any(p.returncode != 0 for p in processes): 
-        # 如果是文件已满导致提前退出，不视为错误
         final_count = len([f for f in os.listdir(track_dir)]) if track_dir else 0
-        if target_total > 0 and final_count < target_total:
-            raise Exception(f"Failed at stage {step_num}")
+        if target_total > 0 and final_count < target_total: raise Exception(f"Failed at stage {step_num}")
 
 async def run_v2_pipeline(task_id, resume_from_step=1):
     db = SessionLocal(); t = db.query(Task).filter(Task.id == task_id).first()
@@ -213,20 +190,16 @@ async def run_v2_pipeline(task_id, resume_from_step=1):
     total_steps = 5; t.status = "Running"; db.commit(); db.close()
     
     try:
-        # Step 1 & 2: 动态检测显存并启动并发
         for step_idx in [1, 2]:
             if resume_from_step <= step_idx:
                 free_vram = await wait_for_vram(task_id, min_gb=6.0)
                 concurrent = 3 if free_vram >= 18.0 else 1
-                
-                if step_idx == 1:
-                    run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos, concurrent_num=concurrent)
-                else:
-                    run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg, concurrent_num=concurrent)
+                if step_idx == 1: await run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos, concurrent_num=concurrent)
+                else: await run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg, concurrent_num=concurrent)
 
-        if resume_from_step <= 3: run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env)
-        if resume_from_step <= 4: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, "样本增强与特征提取", scripts_dir, env)
-        if resume_from_step <= 5: run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, "训练模型", scripts_dir, env)
+        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env)
+        if resume_from_step <= 4: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, "样本增强与特征提取", scripts_dir, env)
+        if resume_from_step <= 5: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, "训练模型", scripts_dir, env)
         
         db_f = SessionLocal(); t_f = db_f.query(Task).filter(Task.id == task_id).first()
         if t_f: t_f.status, t_f.sub_status, t_f.progress = "Completed", "训练完成", 100; db_f.commit(); db_f.close()
