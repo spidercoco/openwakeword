@@ -29,4 +29,4 @@ target_false_positives_per_hour: 0.2
 target_phrase:
 - hey sebastian
 target_recall: 0.25
-tts_batch_size: 5
+tts_batch_size: 10

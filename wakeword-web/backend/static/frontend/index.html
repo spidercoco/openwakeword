@@ -11,69 +11,59 @@
         :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --success: #10b981; --error: #ef4444; }
         body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; -webkit-tap-highlight-color: transparent; }
         
-        /* 导航栏响应式 */
         .navbar { background: white; padding: 0.8rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 100; }
         .nav-brand { font-size: 1.1rem; font-weight: bold; color: #1e293b; white-space: nowrap; }
-        .nav-tabs { display: flex; gap: 1rem; margin-left: 1rem; flex: 1; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-tabs { display: flex; gap: 1.5rem; margin-left: 1.5rem; flex: 1; overflow-x: auto; scrollbar-width: none; }
         .nav-tabs::-webkit-scrollbar { display: none; }
-        .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; font-size: 0.9rem; }
+        .nav-tab { cursor: pointer; padding: 0.5rem 0; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; font-size: 0.95rem; }
         .nav-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
         .user-info { display: flex; align-items: center; gap: 0.5rem; }
-        .user-info span { display: none; } /* 手机端隐藏用户名 */
+        .user-info span { display: none; }
 
-        /* 布局响应式 */
         .layout { display: grid; grid-template-columns: 1fr 420px; gap: 1.5rem; max-width: 1300px; margin: 1.5rem auto; padding: 0 1rem; }
-        @media (max-width: 1024px) {
-            .layout { grid-template-columns: 1fr; }
-            .side-bar { order: 2; }
-            .main-content { order: 1; }
-        }
+        @media (max-width: 1024px) { .layout { grid-template-columns: 1fr; } .side-bar { order: 2; } .main-content { order: 1; } }
 
         .card { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
         .step-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem; color: #1e293b; }
         .step-header h2 { font-size: 1.2rem; margin: 0; }
         
-        .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; }
+        .badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 99px; background: #e2e8f0; font-weight: 600; }
         .badge.Completed { background: #dcfce7; color: #166534; }
         .badge.Running { background: #dbeafe; color: #1e40af; }
         .badge.Failed { background: #fee2e2; color: #991b1b; }
 
         input, select { width: 100%; padding: 0.8rem; margin: 0.5rem 0 1.2rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; box-sizing: border-box; outline: none; }
-        input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1); }
-
         .param-group { margin-bottom: 1.2rem; }
-        input[type="range"] { width: 100%; height: 8px; -webkit-appearance: none; background: #e2e8f0; border-radius: 4px; outline: none; border: none; margin: 1rem 0; }
+        input[type="range"] { width: 100%; height: 8px; -webkit-appearance: none; background: #e2e8f0; border-radius: 4px; border: none; margin: 1rem 0; }
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; background: var(--primary); border-radius: 50%; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
 
         button { width: 100%; padding: 0.9rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 1rem; }
-        button:active { transform: scale(0.98); }
         .btn-primary { background: var(--primary); color: white; }
         .btn-outline { background: transparent; border: 1px solid #cbd5e1; color: #64748b; }
         
-        .icon-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; flex-shrink: 0; }
-        .icon-btn svg { width: 18px; height: 18px; }
+        .icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; flex-shrink: 0; transition: all 0.2s; }
+        .icon-btn:hover { border-color: var(--primary); color: var(--primary); background: #f0f7ff; }
+        .icon-btn svg { width: 16px; height: 16px; }
+        .icon-btn.success:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
 
-        /* 进度与看板 */
+        .task-item { padding: 1.5rem 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 1rem; }
+        .task-item:last-child { border-bottom: none; margin-bottom: 0; }
         .pipeline-steps { margin-top: 1rem; background: #f8fafc; border-radius: 8px; padding: 0.8rem; }
         .pipeline-step { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; padding: 0.6rem 0; border-bottom: 1px solid #f1f5f9; }
         .pipeline-step:last-child { border-bottom: none; }
         .progress-mini { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 4px; width: 60px; overflow: hidden; }
         .progress-mini-fill { height: 100%; background: var(--primary); }
 
-        /* 模型列表适配 */
-        .model-row { padding: 1.2rem 0; border-bottom: 1px solid #f1f5f9; }
-        .model-info h4 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+        .model-row { padding: 1.2rem 0; border-bottom: 1px solid #f1f5f9; display: flex; flex-direction: column; align-items: flex-start; }
+        .model-row:last-child { border-bottom: none; }
         
-        /* 弹窗适配 */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
         .modal-content { background: white; padding: 1.5rem; border-radius: 16px; width: 100%; max-width: 400px; text-align: center; }
         .score-display { width: 140px; height: 140px; border-radius: 50%; border: 8px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 1.5rem auto; }
+        .score-display.detected { border-color: var(--success); background: #ecfdf5; animation: pulse 0.5s; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
         
-        @media (min-width: 768px) {
-            .user-info span { display: block; font-size: 0.9rem; color: #475569; }
-            .nav-brand { font-size: 1.2rem; }
-            .card { padding: 2rem; }
-        }
+        @media (min-width: 768px) { .user-info span { display: block; font-size: 0.9rem; color: #475569; } .nav-brand { font-size: 1.2rem; } .card { padding: 2rem; } }
     </style>
 </head>
 <body>
@@ -121,7 +111,7 @@
                         {progressText && <div style={{fontSize: '0.75rem', color: 'var(--primary)', marginLeft: '24px', marginTop: '4px', fontWeight: 'bold'}}>数量: {progressText}</div>}
                     </div>
                     {task.status !== 'Running' && (
-                        <div className="icon-btn" title="重试" onClick={() => onRetry(task.id, stepNum)} style={{width:28, height:28}}>
+                        <div className="icon-btn" title="重试" onClick={() => onRetry(task.id, stepNum)} style={{width:24, height:24}}>
                             <IconRetry />
                         </div>
                     )}
@@ -162,11 +152,7 @@
             }, [tasks]);
 
             const logout = () => { setUser(null); setToken(null); localStorage.removeItem('token'); };
-            const fetchUser = useCallback((t) => {
-                fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }})
-                .then(r => r.ok ? r.json() : Promise.reject()).then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); })
-                .catch(() => logout());
-            }, []);
+            const fetchUser = useCallback((t) => { fetch(`${API}/me`, { headers: { 'Authorization': `Bearer ${t}` }}).then(r => r.ok ? r.json() : Promise.reject()).then(data => { setUser(data); setToken(t); localStorage.setItem('token', t); }).catch(() => logout()); }, []);
             const fetchTasks = useCallback((t) => { t && fetch(`${API}/my-tasks`, { headers: { 'Authorization': `Bearer ${t}` }}).then(r => r.json()).then(setTasks).catch(()=>{}); }, []);
             const fetchModels = useCallback((t) => { t && fetch(`${API}/models`, { headers: { 'Authorization': `Bearer ${t}` }}).then(r => r.json()).then(setModels).catch(()=>{}); }, []);
 
@@ -204,7 +190,7 @@
                         }
                     };
                     source.connect(processorRef.current); processorRef.current.connect(audioCtxRef.current.destination);
-                } catch (err) { alert("麦克风启动失败，请检查权限或HTTPS环境"); stopLiveTest(); }
+                } catch (err) { alert("麦克风启动失败"); stopLiveTest(); }
             };
 
             const stopLiveTest = () => { wsRef.current?.close(); processorRef.current?.disconnect(); audioCtxRef.current?.close(); setTestModalOpen(false); setTestingModel(null); };
@@ -234,6 +220,11 @@
                     if (res.ok) { setUiStep(1); setWakeword(""); setPreviews([]); setSimilarWords([]); fetchTasks(token); }
                 } catch (e) { alert("提交失败"); }
                 setLoading(false);
+            };
+
+            const getStatusLabel = (s) => {
+                const map = { 'Running': '进行中', 'Completed': '已完成', 'Failed': '失败', 'Pending': '等待' };
+                return map[s] || s;
             };
 
             if (!user) return <div style={{display:'flex',height:'100vh',alignItems:'center',justifyContent:'center'}}><h1>🐻 openwakeword 训练平台</h1></div>;
@@ -297,11 +288,11 @@
                                         {models.length === 0 && <p style={{color: '#94a3b8'}}>尚未有训练完成的模型。</p>}
                                         {models.map(m => (
                                             <div key={m.id} className="model-row">
-                                                <div className="model-info">
-                                                    <h4>{m.wakeword}</h4>
-                                                    <p>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本</p>
+                                                <div style={{marginBottom:'0.5rem'}}>
+                                                    <h4 style={{margin:0}}>{m.wakeword}</h4>
+                                                    <p style={{margin:0, fontSize:'0.8rem', color:'#64748b'}}>ID: {m.id} | {m.params?.num_samples?.toLocaleString() || 'N/A'} 样本</p>
                                                 </div>
-                                                <div style={{display: 'flex', gap: '0.8rem'}}>
+                                                <div style={{display: 'flex', gap: '0.8rem', width: '100%', justifyContent: 'flex-end'}}>
                                                     <div className="icon-btn success" onClick={() => window.open(m.download_url)} title="下载"><IconDownload /></div>
                                                     <div className="icon-btn" onClick={() => startLiveTest(m)} title="测试"><IconMic /></div>
                                                 </div>
@@ -319,7 +310,7 @@
                                     <div key={t.id} className="task-item">
                                         <div style={{display: 'flex', justifyContent: 'space-between', alignItems:'center'}}>
                                             <strong>{t.wakeword}</strong>
-                                            <span className={`badge ${t.status}`}>{t.status === "Completed" ? "已完成" : t.status === "Running" ? "运行中" : t.status === "Failed" ? "失败" : "等待"}</span>
+                                            <span className={`badge ${t.status}`}>{getStatusLabel(t.status)}</span>
                                         </div>
                                         <div className="pipeline-steps">
                                             <StepItem task={t} stepNum={1} label="生成正样本" onRetry={handleRetry} />

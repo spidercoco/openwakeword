@@ -62,21 +62,27 @@ def generate_samples(similar_words, max_samples, output_dir, batch_size=1, model
         print(f"Overwrite mode: Clearing {output_dir}...")
         for f in os.listdir(output_dir):
             if f.endswith(".wav"): os.remove(os.path.join(output_dir, f))
-        current_count = 0
-    else:
-        existing_files = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
-        current_count = len(existing_files)
-    
-    if current_count >= max_samples:
-        print(f"Target reached: {current_count}/{max_samples}. Skipping.")
-        print(f"PROGRESS:{current_count}/{max_samples}", flush=True)
+
+    # 初次检查
+    current_total = len([f for f in os.listdir(output_dir) if f.endswith(".wav")])
+    if current_total >= max_samples:
+        print(f"Target reached: {current_total}/{max_samples}. Skipping.")
+        print(f"PROGRESS:{max_samples}/{max_samples}", flush=True)
         return
 
-    print(f"Starting generation: {current_count} exist, need {max_samples - current_count} more.")
-    pbar = tqdm(total=max_samples, initial=current_count, desc=f"Generating to {os.path.basename(output_dir)}")
+    pbar = tqdm(total=max_samples, initial=current_total, desc=f"Generating to {os.path.basename(output_dir)}")
     
-    while current_count < max_samples:
-        current_batch_size = min(batch_size, max_samples - current_count)
+    while True:
+        # 实时统计物理文件数
+        current_total = len([f for f in os.listdir(output_dir) if f.endswith(".wav")])
+        print(f"PROGRESS:{current_total}/{max_samples}", flush=True)
+        pbar.n = min(current_total, max_samples)
+        pbar.refresh()
+
+        if current_total >= max_samples:
+            break
+
+        current_batch_size = min(batch_size, max_samples - current_total)
         batch_texts = [random.choice(similar_words) for _ in range(current_batch_size)]
         batch_instructs = [get_random_instruct() for _ in range(current_batch_size)]
         
@@ -94,10 +100,6 @@ def generate_samples(similar_words, max_samples, output_dir, batch_size=1, model
                 
                 fname = f"sim_{uuid.uuid4().hex[:10]}.wav"
                 sf.write(os.path.join(output_dir, fname), audio_final, sr)
-                current_count += 1
-                pbar.update(1)
-                print(f"PROGRESS:{current_count}/{max_samples}", flush=True)
-                if current_count >= max_samples: break
         except Exception as e:
             print(f"Error: {e}")
             continue
