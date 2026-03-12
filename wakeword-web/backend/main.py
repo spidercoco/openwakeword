@@ -185,23 +185,40 @@ async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=No
             db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
             if t_u: t_u.progress, t_u.sub_status = 100, f"{sub_status_msg} ({count}/{target_total})"; db_u.commit()
             db_u.close(); return
+print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
+processes = []
+for i in range(concurrent_num):
+    # 暂时放开第一个进程的 stdout 用于调试
+    stdout_dest = subprocess.PIPE if i == 0 else subprocess.DEVNULL
+    p = subprocess.Popen(cmd, stdout=stdout_dest, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd, env=env)
+    processes.append(p)
 
-    print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
-    processes = []
-    for _ in range(concurrent_num):
-        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=cwd, env=env)
-        processes.append(p)
-    try:
-        while any(p.poll() is None for p in processes):
-            current_count = 0
-            if track_dir and os.path.exists(track_dir): current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
-            if target_total > 0:
-                step_percent = min(100, int((current_count / target_total) * 100))
-                db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
-                if t_u: t_u.progress, t_u.sub_status = step_percent, f"{sub_status_msg} ({current_count}/{target_total})"; db_u.commit()
-                db_u.close()
-                if current_count >= target_total:
-                    for p in processes: 
+# 异步读取调试日志
+async def log_output(proc, idx, stream_name):
+    stream = proc.stdout if stream_name == 'stdout' else proc.stderr
+    while True:
+        line = await asyncio.to_thread(stream.readline)
+        if not line: break
+        print(f"[{task_id}][P{idx} {stream_name}] {line.strip()}")
+
+for i, p in enumerate(processes):
+    if i == 0: asyncio.create_task(log_output(p, i, 'stdout'))
+    asyncio.create_task(log_output(p, i, 'stderr'))
+try:
+    while any(p.poll() is None for p in processes):
+        current_count = 0
+        if track_dir and os.path.exists(track_dir): current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
+
+        if target_total > 0:
+            step_percent = min(100, int((current_count / target_total) * 100))
+            db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
+            if t_u:
+                t_u.progress = step_percent
+                # 如果数量为 0，给出一个人性化的提示
+                display_count = f"{current_count}/{target_total}" if current_count > 0 else "正在初始化模型..."
+                t_u.sub_status = f"{sub_status_msg} ({display_count})"
+                db_u.commit()
+            db_u.close()
                         try: p.terminate()
                         except: pass
                     break
