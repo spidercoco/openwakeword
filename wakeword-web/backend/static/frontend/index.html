@@ -262,10 +262,22 @@
                                     )}
                                     {uiStep === 2 && (
                                         <div>
-                                            <div className="step-header"><h2>2. 管理对抗样本</h2></div>
+                                            <div className="step-header"><h2>2. 管理近似词</h2></div>
                                             <input value={newWordInput} onChange={e => setNewWordInput(e.target.value)} placeholder="手动添加近似词，逗号分隔" />
                                             <button onClick={() => { const words = newWordInput.split(/[,，]/).map(w => w.trim()).filter(w => w); setSimilarWords([...similarWords, ...words]); setNewWordInput(""); }} className="btn-primary" style={{marginBottom:'1rem'}}>添加</button>
-                                            <div className="tag-list">{similarWords.map((w, i) => <span key={i} className="tag">{w}<span style={{cursor:'pointer', opacity:0.5}} onClick={() => setSimilarWords(similarWords.filter((_, idx) => idx !== i))}> ×</span></span>)}</div>
+                                            <div className="tag-list" style={{gap: '0.8rem', margin: '1.5rem 0'}}>
+                                                {similarWords.map((w, i) => (
+                                                    <span key={i} className="tag" style={{padding: '0.5rem 1rem', fontSize: '1rem'}}>
+                                                        {w}
+                                                        <span 
+                                                            style={{cursor:'pointer', marginLeft: '8px', color: '#94a3b8', fontWeight: 'bold', fontSize: '1.2rem', transition: 'color 0.2s'}} 
+                                                            onMouseEnter={(e) => e.target.style.color = '#ef4444'}
+                                                            onMouseLeave={(e) => e.target.style.color = '#94a3b8'}
+                                                            onClick={() => setSimilarWords(similarWords.filter((_, idx) => idx !== i))}
+                                                        >×</span>
+                                                    </span>
+                                                ))}
+                                            </div>
                                             <button onClick={() => setUiStep(3)} className="btn-primary" disabled={similarWords.length === 0} style={{marginTop:'1rem'}}>确认词汇，下一步</button>
                                             <button onClick={handleGetSimilars} className="btn-outline" style={{marginTop: '0.5rem'}} disabled={loading}>换一批</button>
                                         </div>
