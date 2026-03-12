@@ -96,47 +96,25 @@ os.makedirs("static/previews", exist_ok=True)
 os.makedirs("static/datasets", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- 物理任务找回逻辑 ---
+# --- 物理任务找回 ---
 def recover_physical_tasks():
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == "LocalDev").first()
+    db = SessionLocal(); user = db.query(User).filter(User.username == "LocalDev").first()
     if not user: return
-    
     datasets_dir = "static/datasets"
     if not os.path.exists(datasets_dir): return
-    
     for task_id in os.listdir(datasets_dir):
         task_path = os.path.join(datasets_dir, task_id)
         if not os.path.isdir(task_path): continue
-        
-        # 检查是否已完成 (有配置文件和模型文件)
-        config_file = os.path.join(task_path, "config.yaml")
-        model_file = os.path.join(task_path, "beary_custom.onnx")
-        
+        config_file = os.path.join(task_path, "config.yaml"); model_file = os.path.join(task_path, "beary_custom.onnx")
         if os.path.exists(config_file) and os.path.exists(model_file):
-            # 检查数据库记录
-            existing = db.query(Task).filter(Task.id == task_id).first()
-            if not existing:
-                print(f"Recovering completed task: {task_id}")
+            if not db.query(Task).filter(Task.id == task_id).first():
                 try:
-                    with open(config_file, 'r', encoding="utf-8") as f:
-                        cfg = yaml.safe_load(f)
-                    
+                    with open(config_file, 'r', encoding="utf-8") as f: cfg = yaml.safe_load(f)
                     wakeword = cfg.get("target_phrase", task_id)
                     if isinstance(wakeword, list): wakeword = wakeword[0]
-                    
-                    new_task = Task(
-                        id=task_id, user_id=user.id, wakeword=wakeword,
-                        status="Completed", sub_status="物理找回已完成任务",
-                        current_step=5, progress=100,
-                        params={"num_samples": cfg.get("n_samples"), "steps": cfg.get("steps"), "layer_size": cfg.get("layer_size")},
-                        created_at=datetime.fromtimestamp(os.path.getctime(model_file))
-                    )
-                    db.add(new_task)
-                except Exception as e:
-                    print(f"Failed to recover {task_id}: {e}")
-    db.commit()
-    db.close()
+                    db.add(Task(id=task_id, user_id=user.id, wakeword=wakeword, status="Completed", sub_status="物理找回已完成任务", current_step=5, progress=100, params={"num_samples": cfg.get("n_samples"), "steps": cfg.get("steps"), "layer_size": cfg.get("layer_size")}, created_at=datetime.fromtimestamp(os.path.getctime(model_file))))
+                except: pass
+    db.commit(); db.close()
 
 # --- 显存检测逻辑 ---
 def get_free_vram_gb():
@@ -157,7 +135,7 @@ async def wait_for_vram(task_id, min_gb=6.0):
         if t: t.sub_status = f"显存不足(剩余 {f:.1f}G), 正在等待..."; db.commit()
         db.close(); await asyncio.sleep(5)
 
-# --- 业务逻辑 ---
+# --- 核心业务 ---
 def get_dynamic_config(n_samples, steps, layer_size, aug_rounds):
     val_samples = max(20, int(n_samples * 0.2)); pos_batch = 50 if n_samples > 100 else 16
     neg_weight = 1500 if layer_size >= 64 else 800; acc = 0.6 if steps >= 1000 else 0.5
@@ -179,46 +157,49 @@ async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=No
     if t: t.sub_status, t.current_step, t.progress = sub_status_msg, step_num, 0; db.commit()
     db.close()
     
-    if track_dir and target_total > 0 and os.path.exists(track_dir):
+    if track_dir and os.path.exists(track_dir):
+        tmp_files = [f for f in os.listdir(track_dir) if f.endswith(".tmp")]
+        for f in tmp_files:
+            try: os.remove(os.path.join(track_dir, f))
+            except: pass
         count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
-        if count >= target_total:
+        if target_total > 0 and count >= target_total:
             db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
             if t_u: t_u.progress, t_u.sub_status = 100, f"{sub_status_msg} ({count}/{target_total})"; db_u.commit()
             db_u.close(); return
-print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
-processes = []
-for i in range(concurrent_num):
-    # 暂时放开第一个进程的 stdout 用于调试
-    stdout_dest = subprocess.PIPE if i == 0 else subprocess.DEVNULL
-    p = subprocess.Popen(cmd, stdout=stdout_dest, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd, env=env)
-    processes.append(p)
 
-# 异步读取调试日志
-async def log_output(proc, idx, stream_name):
-    stream = proc.stdout if stream_name == 'stdout' else proc.stderr
-    while True:
-        line = await asyncio.to_thread(stream.readline)
-        if not line: break
-        print(f"[{task_id}][P{idx} {stream_name}] {line.strip()}")
+    print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
+    processes = []
+    for i in range(concurrent_num):
+        stdout_dest = subprocess.PIPE if i == 0 else subprocess.DEVNULL
+        p = subprocess.Popen(cmd, stdout=stdout_dest, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd, env=env)
+        processes.append(p)
 
-for i, p in enumerate(processes):
-    if i == 0: asyncio.create_task(log_output(p, i, 'stdout'))
-    asyncio.create_task(log_output(p, i, 'stderr'))
-try:
-    while any(p.poll() is None for p in processes):
-        current_count = 0
-        if track_dir and os.path.exists(track_dir): current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
+    async def log_output(proc, idx, stream_name):
+        stream = proc.stdout if stream_name == 'stdout' else proc.stderr
+        if not stream: return
+        while True:
+            line = await asyncio.to_thread(stream.readline)
+            if not line: break
+            print(f"[{task_id}][P{idx} {stream_name}] {line.strip()}")
 
-        if target_total > 0:
-            step_percent = min(100, int((current_count / target_total) * 100))
-            db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
-            if t_u:
-                t_u.progress = step_percent
-                # 如果数量为 0，给出一个人性化的提示
-                display_count = f"{current_count}/{target_total}" if current_count > 0 else "正在初始化模型..."
-                t_u.sub_status = f"{sub_status_msg} ({display_count})"
-                db_u.commit()
-            db_u.close()
+    for i, p in enumerate(processes):
+        if i == 0: asyncio.create_task(log_output(p, i, 'stdout'))
+        asyncio.create_task(log_output(p, i, 'stderr'))
+
+    try:
+        while any(p.poll() is None for p in processes):
+            current_count = 0
+            if track_dir and os.path.exists(track_dir): current_count = len([f for f in os.listdir(track_dir) if f.endswith(".wav")])
+            if target_total > 0:
+                step_percent = min(100, int((current_count / target_total) * 100))
+                db_u = SessionLocal(); t_u = db_u.query(Task).filter(Task.id == task_id).first()
+                if t_u:
+                    display_count = f"{current_count}/{target_total}" if current_count > 0 else "正在初始化模型..."
+                    t_u.progress, t_u.sub_status = step_percent, f"{sub_status_msg} ({display_count})"; db_u.commit()
+                db_u.close()
+                if current_count >= target_total:
+                    for p in processes: 
                         try: p.terminate()
                         except: pass
                     break
@@ -244,7 +225,7 @@ async def run_v2_pipeline(task_id, resume_from_step=1):
                 concurrent = 3 if free_vram >= 18.0 else 1
                 if step_idx == 1: await run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos, concurrent_num=concurrent)
                 else: await run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg, concurrent_num=concurrent)
-        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env)
+        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env, track_dir=os.path.join(task_dir, "positive_train_tts_16k"), target_total=n_pos)
         if resume_from_step <= 4: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, "样本增强与特征提取", scripts_dir, env)
         if resume_from_step <= 5: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, "训练模型", scripts_dir, env)
         db_f = SessionLocal(); t_f = db_f.query(Task).filter(Task.id == task_id).first()
@@ -259,7 +240,7 @@ async def websocket_test_model(websocket: WebSocket, task_id: str):
     backend_dir = os.path.dirname(os.path.abspath(__file__)); root_dir = os.path.dirname(os.path.dirname(backend_dir))
     model_path = os.path.join(root_dir, "beary.onnx") if task_id == "built-in-beary" else os.path.join(backend_dir, f"static/datasets/{task_id}/beary_custom.onnx")
     if not os.path.exists(model_path) or not HAS_INFERENCE_LIBS:
-        await websocket.send_json({"error": "模型文件未找到或推理库未加载"}); await websocket.close(); return
+        await websocket.send_json({"error": "模型未就绪"}); await websocket.close(); return
     try:
         session = ort.InferenceSession(model_path); input_name = session.get_inputs()[0].name; model_window_size = session.get_inputs()[0].shape[1]
         F = AudioFeatures(); audio_buffer = np.array([], dtype=np.int16)
@@ -271,10 +252,7 @@ async def websocket_test_model(websocket: WebSocket, task_id: str):
                     score = float(session.run(None, {input_name: features[:, -model_window_size:, :]})[0][0][0])
                     await websocket.send_json({"score": score})
                     audio_buffer = np.array([], dtype=np.int16) if score > 0.5 else audio_buffer[-48000:]
-    except WebSocketDisconnect: pass
-    except Exception as e:
-        try: await websocket.send_json({"error": str(e)})
-        except: pass
+    except: pass
 
 @app.get("/")
 async def read_root(): return RedirectResponse(url="/site/static/frontend/index.html")
@@ -316,10 +294,6 @@ async def list_models(user=Depends(get_current_user), db: Session = Depends(get_
 
 if __name__ == "__main__":
     import uvicorn
-    # 启动前清理僵尸任务
     db = SessionLocal(); stale_tasks = db.query(Task).filter(Task.status == "Running").all()
-    for t in stale_tasks: t.status, t.sub_status = "Failed", "服务重启，任务已中断"
-    db.commit()
-    # 启动前找回物理任务
-    recover_physical_tasks()
-    db.close(); uvicorn.run(app, host="0.0.0.0", port=8000)
+    for task in stale_tasks: task.status, task.sub_status = "Failed", "服务重启，任务已中断"
+    db.commit(); recover_physical_tasks(); db.close(); uvicorn.run(app, host="0.0.0.0", port=8000)
