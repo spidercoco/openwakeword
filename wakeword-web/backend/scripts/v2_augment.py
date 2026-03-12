@@ -6,6 +6,7 @@ import argparse
 import logging
 from tqdm import tqdm
 import yaml
+import scipy
 from pathlib import Path
 import openwakeword
 from openwakeword.data import augment_clips
@@ -24,6 +25,9 @@ def main():
         config = yaml.load(f, Loader=yaml.Loader)
 
     task_root = os.path.dirname(os.path.abspath(args.config))
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    print(current_dir)
     
     # 定义目录 (严格对应 v2_resample.py 输出的目录)
     positive_train_dir = os.path.join(task_root, "positive_train")
@@ -35,23 +39,37 @@ def main():
     # 注意：这里假设 RIR 和背景音在项目根目录下，我们需要处理路径
     # 为了简化，我们直接从 config 中读取，如果不存在则使用默认路径
     def get_abs_paths(paths):
-        base_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(task_root))))
         abs_paths = []
         for p in paths:
             # 移除 ./ 前缀
             clean_p = p.replace("./", "")
-            abs_paths.append(os.path.join(base_project_root, clean_p))
+            abs_paths.append(os.path.join(current_dir, clean_p))
         return abs_paths
 
     rir_base_paths = get_abs_paths(config.get("rir_paths", ["mit_rirs"]))
     bg_base_paths = get_abs_paths(config.get("background_paths", ["audioset_16k", "fma"]))
     
+    print(rir_base_paths)
+    print(bg_base_paths)
     rir_paths = [i.path for j in rir_base_paths if os.path.exists(j) for i in os.scandir(j)]
     background_paths = []
     bg_dupe = config.get("background_paths_duplication_rate", [1] * len(bg_base_paths))
     for bg_path, dupe in zip(bg_base_paths, bg_dupe):
         if os.path.exists(bg_path):
             background_paths.extend([i.path for i in os.scandir(bg_path)] * dupe)
+
+    n = 50  # sample size
+    positive_clips = [str(i) for i in Path(positive_test_dir).glob("*.wav")]
+    duration_in_samples = []
+    for i in range(n):
+        sr, dat = scipy.io.wavfile.read(positive_clips[np.random.randint(0, len(positive_clips))])
+        duration_in_samples.append(len(dat))
+
+    config["total_length"] = int(round(np.median(duration_in_samples)/1000)*1000) + 12000  # add 750 ms to clip duration as buffer
+    if config["total_length"] < 32000:
+        config["total_length"] = 32000  # set a minimum of 32000 samples (2 seconds)
+    elif abs(config["total_length"] - 32000) <= 4000:
+        config["total_length"] = 32000
 
     # 3. 初始化增强生成器 (逻辑完全同步 augment_clips.py)
     total_length = config.get("total_length", 3 * 16000)
@@ -84,7 +102,7 @@ def main():
         # 封装 compute_features 以便支持进度输出
         # 注意：compute_features_from_generator 内部会打印 tqdm，我们这里通过包装来输出 PROGRESS
         # 简单起见，我们假设每个阶段执行完后更新一个大进度
-        compute_features_from_generator(gen, n_total=n_total * aug_rounds,
+        compute_features_from_generator(gen, n_total=n_total,
                                         clip_duration=total_length,
                                         output_file=output_file,
                                         device=device, ncpu=n_cpus if device == "cpu" else 1)

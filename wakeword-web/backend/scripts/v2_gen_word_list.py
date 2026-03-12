@@ -10,39 +10,33 @@ from dashscope import Generation
 
 def get_similar_words(wakeword):
     api_key = os.getenv("DASHSCOPE_API_KEY")
-    model_name = "qwen-max"
+    model_name = "qwen3-max"
 
     prompt = f"""你是一个中文语音对抗样本生成器。
-
 输入：一个中文词语
-
-目标：生成大量读音非常接近但绝对不能发音完全一样的词语。
-
+任务：生成与输入词语读音高度相似但拼音序列绝不完全相同的词语，并返回结构化结果。
 要求：
-1. 拼音相似度 >= 80%
-2. 可以改变：
-   - 声母
-   - 韵母
-   - 声调
-3. 可以生成无意义词语
-4. 保持相同字数
-5. 不要解释
-用json的列表返回。
+1. 输出词语必须与输入字数一致；
+2. 整体拼音相似度 ≥ 80%（允许个别音节的声母、韵母或声调变化）；
+3. 每个输出词的完整带调拼音必须与原词拼音不同；
+4. 所有输出词之间的完整带调拼音也必须互不相同（按拼音去重，非汉字去重）；
+5. 优先选择真实存在或语义合理的词语，避免生造无意义组合；
+6. 禁止输出拼音与原词完全一致的词语（即使汉字不同，如“飞”→“非”若都读 fēi，则视为无效）；
+7. 对每个候选词，必须显式计算其标准带调拼音（如 nǐ hǎo xiǎo fēi），并验证：
+  - ≠ 原词拼音
+  - ≠ 其他已生成词的拼音
+输出格式：
+返回一个 JSON 对象，包含以下两个字段：
+"original_pinyin": 原输入词的标准带调拼音（字符串）
+"samples": 一个列表，每个元素为对象，包含：
+  - "text": 对抗样本词语（字符串）
+  - "pinyin": 该词语的标准带调拼音（字符串）
+不要包含任何额外说明、注释或 Markdown。
 
-**请在返回前再次根据声母，韵母，声调分别确认，绝对不能和原词语完全一样。**
-
-输入词语："{wakeword}"
+输入是：{wakeword}
 """
 
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant that only outputs JSON arrays."},
-        {"role": "user", "content": prompt}
-    ]
-
-    print(f"--- LLM Call (DashScope) ---")
-    print(f"Model: {model_name}")
-    print(f"Prompt: {wakeword}")
-    print(f"----------------------------")
+    messages = [{"role": "user", "content": prompt}]
 
     try:
         response = Generation.call(
@@ -54,28 +48,17 @@ def get_similar_words(wakeword):
         )
 
         if response.status_code == 200:
-            msg = response.output.choices[0].message
-            
-            # 打印思考过程（如果存在）
-
-            answer_content = msg.content
-            print("--- 完整回复 ---")
-            print(answer_content)
-            print("----------------")
-
-            # 尝试从返回内容中提取 JSON 数组
-            match = re.search(r"\[.*\]", answer_content, re.DOTALL)
+            content = response.output.choices[0].get('message', {}).get('content', "")
+            # 提取并解析 JSON
+            match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:
-                words = json.loads(match.group(0))
-                return words
-            else:
-                return [wakeword + "类似"]
-        else:
-            print(f"API Error: {response.code} - {response.message}")
+                data = json.loads(match.group(0))
+                if "samples" in data:
+                    return [s["text"] for s in data["samples"] if "text" in s]
             return []
-            
-    except Exception as e:
-        print(f"Error calling DashScope: {e}")
+        else:
+            return []
+    except:
         return []
 
 if __name__ == "__main__":

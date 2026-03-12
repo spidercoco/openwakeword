@@ -610,9 +610,21 @@ def main():
         else:
             label_transforms[key] = lambda x: [0 for i in x]
 
+    base_project_root  = os.path.dirname(os.path.abspath(__file__))
+    def get_abs_path(path):
+        # 移除 ./ 前缀
+        clean_p = path.replace("./", "")
+        return os.path.join(base_project_root, clean_p)
+
+    print(get_abs_path(config["feature_data_files"]['ACAV100M_sample']))
+
     # Add generated positive and adversarial negative clips to the feature data files dictionary
     config["feature_data_files"]['positive'] = pos_train_feat
     config["feature_data_files"]['adversarial_negative'] = neg_train_feat
+    config["feature_data_files"]['ACAV100M_sample'] = get_abs_path(config["feature_data_files"]['ACAV100M_sample'])
+    config['false_positive_validation_data_path'] = get_abs_path(config['false_positive_validation_data_path'])
+
+    print(config)
     
     # Make PyTorch data loaders for training and validation data
     batch_generator = mmap_batch_generator(

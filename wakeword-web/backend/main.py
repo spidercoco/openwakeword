@@ -154,7 +154,8 @@ async def run_cmd_v2(cmd, task_id, step_num, total_steps, sub_status_msg, cwd=No
             if t_u: t_u.progress, t_u.sub_status = 100, f"{sub_status_msg} ({count}/{target_total})"; db_u.commit()
             db_u.close(); return
 
-    print(f"🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})")
+    full_cmd_str = " ".join(cmd)
+    print(f"\n" + "="*60 + f"\n🚀 [TASK {task_id}] Step {step_num}: {sub_status_msg} (Parallel: {concurrent_num})\n📁 CWD: {cwd}\n💻 Command: {full_cmd_str}\n" + "="*60 + "\n")
     
     processes = []
     for _ in range(concurrent_num):
