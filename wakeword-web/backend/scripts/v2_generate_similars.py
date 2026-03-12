@@ -103,7 +103,7 @@ def generate_samples(similar_words, max_samples, output_dir, batch_size=1, model
                 tmp_path = os.path.join(output_dir, tmp_fname)
                 final_path = os.path.join(output_dir, fname)
                 
-                sf.write(tmp_path, audio_final, sr)
+                sf.write(tmp_path, audio_final, sr, format='WAV')
                 os.rename(tmp_path, final_path) # 原子重命名
         except Exception as e:
             print(f"Error: {e}")
