@@ -687,6 +687,20 @@ def main():
     # 导出
     oww.export_model(model=best_model, model_name=config["model_name"], output_dir=task_root)
 
+    # 保存最终指标
+    final_metrics = {
+        "recall": float(oww.history.get("val_recall", [0])[-1]),
+        "accuracy": float(oww.history.get("val_accuracy", [0])[-1]),
+        "fp_per_hr": float(oww.history.get("val_fp_per_hr", [0])[-1]),
+        "timestamp": json.dumps(json.dumps(str(torch.utils.data.datetime.now())))
+    }
+    # 尝试更准确地获取最后一步指标（如果 history 为空则使用 oww 属性）
+    if not final_metrics["recall"]: final_metrics["recall"] = float(oww.best_val_recall)
+    if not final_metrics["accuracy"]: final_metrics["accuracy"] = float(oww.best_val_accuracy)
+
+    with open(os.path.join(task_root, "metrics.json"), "w") as f:
+        json.dump(final_metrics, f)
+
     # 保存图表与指标
     plt.figure()
     plt.plot(oww.history['loss'], label="loss")

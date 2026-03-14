@@ -26,6 +26,11 @@ def resample_directory(input_dir, output_dir, target_sr=16000):
 
     for i, f in enumerate(files):
         output_file = output_path / f.name
+        tmp_file = output_path / (f.name + ".tmp")
+        
+        # 创建临时文件以辅助 UI 进度监控
+        with open(tmp_file, 'w') as _: pass
+
         # ffmpeg 转换：采样率 16000，声道 1 (mono)
         cmd = [
             "ffmpeg", "-y", "-i", str(f),
@@ -34,8 +39,10 @@ def resample_directory(input_dir, output_dir, target_sr=16000):
         ]
         try:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            if tmp_file.exists(): tmp_file.unlink()
         except Exception as e:
             print(f"Error processing {f}: {e}")
+            if tmp_file.exists(): tmp_file.unlink()
             continue
         
         # 为平台输出进度

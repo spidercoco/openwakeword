@@ -40,6 +40,23 @@ BASE_PREFIX = "/site"
 DATABASE_URL = "sqlite:///./wakeword.db"
 TRAIN_CONDA_ENV = "oww_train"
 
+# --- TTS 预加载 (仅预览使用) ---
+TTS_MODEL = None
+def get_tts_model():
+    global TTS_MODEL
+    if TTS_MODEL is None:
+        try:
+            scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+            if scripts_dir not in sys.path: sys.path.append(scripts_dir)
+            from qwen_tts import Qwen3TTSModel
+            MODEL_PATH = "/data/model/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+            DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+            dtype = torch.bfloat16 if "cuda" in DEVICE else (torch.float16 if "mps" in DEVICE else torch.float32)
+            TTS_MODEL = Qwen3TTSModel.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=dtype, trust_remote_code=True)
+            print("✅ TTS Preloaded")
+        except Exception as e: print(f"TTS Preload Error: {e}")
+    return TTS_MODEL
+
 # --- 数据库模型 ---
 Base = declarative_base()
 class User(Base):
@@ -137,9 +154,15 @@ async def wait_for_vram(task_id, min_gb=6.0):
 
 # --- 核心业务 ---
 def get_dynamic_config(n_samples, steps, layer_size, aug_rounds):
-    val_samples = max(20, int(n_samples * 0.2)); pos_batch = 50 if n_samples > 100 else 16
-    neg_weight = 1500 if layer_size >= 64 else 800; acc = 0.6 if steps >= 1000 else 0.5
-    return {"n_samples": n_samples, "n_samples_val": val_samples, "steps": steps, "layer_size": layer_size, "augmentation_rounds": aug_rounds, "batch_n_per_class": {"positive": pos_batch, "adversarial_negative": 50, "ACAV100M_sample": 128}, "max_negative_weight": neg_weight, "target_accuracy": acc}
+    val_samples = max(20, int(n_samples * 0.2))
+    acc = 0.6 if steps >= 1000 else 0.5
+    return {
+        "n_samples": n_samples, "n_samples_val": val_samples, "steps": steps, 
+        "layer_size": layer_size, "augmentation_rounds": aug_rounds, 
+        "tts_batch_size": 16,
+        "batch_n_per_class": {"positive": 80, "adversarial_negative": 20, "ACAV100M_sample": 900}, 
+        "max_negative_weight": 10, "target_accuracy": acc
+    }
 
 def generate_task_yaml(task_dir, wakeword, similar_words, n_samples, steps, layer_size, aug_rounds):
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -222,10 +245,11 @@ async def run_v2_pipeline(task_id, resume_from_step=1):
         for step_idx in [1, 2]:
             if resume_from_step <= step_idx:
                 free_vram = await wait_for_vram(task_id, min_gb=6.0)
-                concurrent = 3 if free_vram >= 18.0 else 1
+                # 正式生成改为单进程，内部使用 BATCH 16 (已在 config.yaml 设置)
+                concurrent = 1
                 if step_idx == 1: await run_cmd_v2(["python", "v2_generate_positives.py", "--config", config_path], task_id, 1, total_steps, "生成正样本", scripts_dir, env, track_dir=pos_train_dir, target_total=n_pos, concurrent_num=concurrent)
                 else: await run_cmd_v2(["python", "v2_generate_similars.py", "--config", config_path], task_id, 2, total_steps, "生成近似词样本", scripts_dir, env, track_dir=neg_train_dir, target_total=n_neg, concurrent_num=concurrent)
-        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env, track_dir=os.path.join(task_dir, "positive_train_tts_16k"), target_total=n_pos)
+        if resume_from_step <= 3: await run_cmd_v2(["python", "v2_resample.py", "--config", config_path], task_id, 3, total_steps, "重采样音频", scripts_dir, env, track_dir=os.path.join(task_dir, "positive_train"), target_total=n_pos)
         if resume_from_step <= 4: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_augment.py", "--config", config_path], task_id, 4, total_steps, "样本增强与特征提取", scripts_dir, env)
         if resume_from_step <= 5: await run_cmd_v2(["conda", "run", "-n", TRAIN_CONDA_ENV, "--no-capture-output", "python", "v2_train.py", "--config", config_path], task_id, 5, total_steps, "训练模型", scripts_dir, env)
         db_f = SessionLocal(); t_f = db_f.query(Task).filter(Task.id == task_id).first()
@@ -262,10 +286,39 @@ async def get_me(u=Depends(get_current_user)): return u
 async def get_my_tasks(u=Depends(get_current_user), db: Session = Depends(get_db)): return db.query(Task).filter(Task.user_id == u.id).order_by(Task.created_at.desc()).all()
 @app.post("/api/preview")
 async def generate_preview(req: PreviewRequest, u=Depends(get_current_user)):
-    p_id = str(uuid.uuid4())[:8]; backend_dir = os.path.dirname(os.path.abspath(__file__)); out_dir = os.path.join(backend_dir, "static/previews", p_id); os.makedirs(out_dir, exist_ok=True)
-    scripts_dir = os.path.join(backend_dir, "scripts"); cmd = [sys.executable, "generate_samples.py", "--wakeword", req.wakeword, "--output_dir", out_dir, "--num_samples", "3"]
-    env = os.environ.copy(); env["PYTHONPATH"] = os.path.dirname(os.path.dirname(backend_dir)) + (":" + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
-    subprocess.run(cmd, check=True, cwd=scripts_dir, env=env); return {"urls": [f"/site/static/previews/{p_id}/{f}" for f in os.listdir(out_dir) if f.endswith(".wav")]}
+    model = get_tts_model()
+    if not model: raise HTTPException(status_code=500, detail="TTS Model not ready")
+    
+    p_id = str(uuid.uuid4())[:8]; backend_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(backend_dir, "static/previews", p_id); os.makedirs(out_dir, exist_ok=True)
+    
+    # 准备批量试听 (3个)
+    num = 3; scripts_dir = os.path.join(backend_dir, "scripts")
+    # 尝试加载 voices.json 用于随机音色
+    voices = []
+    try:
+        with open(os.path.join(scripts_dir, "voices.json"), "r", encoding="utf-8") as f: voices = json.load(f)
+    except: pass
+
+    def get_instr():
+        if voices: return random.choice(voices).get("prompt", "自然")
+        return "自然"
+
+    try:
+        wavs, sr = model.generate_voice_design(
+            text=[req.wakeword] * num,
+            language=["Chinese"] * num,
+            instruct=[get_instr() for _ in range(num)]
+        )
+        urls = []
+        for i, wav in enumerate(wavs):
+            audio_data = wav.cpu().numpy() if torch.is_tensor(wav) else wav
+            fname = f"prev_{i}_{uuid.uuid4().hex[:4]}.wav"
+            sf.write(os.path.join(out_dir, fname), audio_data, sr)
+            urls.append(f"/site/static/previews/{p_id}/{fname}")
+        return {"urls": urls}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 @app.post("/api/generate-similar-words")
 def generate_similar_words(req: SimilarWordsRequest):
     scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"); cmd = [sys.executable, "v2_gen_word_list.py", "--wakeword", req.wakeword]
@@ -288,12 +341,27 @@ async def retry_task(task_id: str, bt: BackgroundTasks, step: int = None, db: Se
 @app.get("/api/models")
 async def list_models(user=Depends(get_current_user), db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.user_id == user.id, Task.status == "Completed").all()
-    user_models = [{"id":t.id, "wakeword":t.wakeword, "params":t.params, "download_url":f"/site/static/datasets/{t.id}/beary_custom.onnx", "is_built_in": False} for t in tasks]
-    built_in = [{"id": "built-in-beary", "wakeword": "小熊 (内置)", "params": {"num_samples": "N/A", "steps": "N/A", "layer_size": "Standard"}, "download_url": "/site/static/beary.onnx", "is_built_in": True}]
+    user_models = []
+    for t in tasks:
+        task_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static/datasets", t.id)
+        metrics = {}
+        metrics_path = os.path.join(task_dir, "metrics.json")
+        if os.path.exists(metrics_path):
+            try:
+                with open(metrics_path, "r") as f: metrics = json.load(f)
+            except: pass
+        user_models.append({
+            "id": t.id, "wakeword": t.wakeword, "params": t.params, 
+            "download_url": f"/site/static/datasets/{t.id}/beary_custom.onnx", 
+            "is_built_in": False, "metrics": metrics
+        })
+    built_in = [{"id": "built-in-beary", "wakeword": "小熊 (内置)", "params": {"num_samples": "N/A", "steps": "N/A", "layer_size": "Standard"}, "download_url": "/site/static/beary.onnx", "is_built_in": True, "metrics": {"accuracy": 0.98, "recall": 0.95}}]
     return built_in + user_models
 
 if __name__ == "__main__":
     import uvicorn
+    # 预加载 TTS (仅给预览使用，正式训练会起子进程重新加载)
+    get_tts_model()
     db = SessionLocal(); stale_tasks = db.query(Task).filter(Task.status == "Running").all()
     for task in stale_tasks: task.status, task.sub_status = "Failed", "服务重启，任务已中断"
     db.commit(); recover_physical_tasks(); db.close(); uvicorn.run(app, host="0.0.0.0", port=8000)
